@@ -1,6 +1,5 @@
 defaults:
   - prior_network: finetune_nt
-  - modules: gaussian3m
 
 sanity_check: False
 working_dir: ???
