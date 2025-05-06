@@ -1,4 +1,5 @@
-# GLM-Prior: a transformer-based nucleotide sequence classification model for inference of prior-knowledge GRNs. 
+# GLM-Prior: 
+a transformer-based nucleotide sequence classification approach for inferring biologically informed prior-knowledge
 -----------
 
 This repository and its references contain the models, data, and scripts used to perform the experiments in the 
