@@ -34,12 +34,12 @@ prior_network_training:
     per_device_train_batch_size: 32
   script_args:
     downsample_rate: 1.0
-    gene_dna_sequences: "preprocessing/hg38/hg38_gene_DNA_sequences.tsv" 
-    tf_dna_sequences: "preprocessing/hg38/hg38_TF_info_scores_with_DBID.tsv"
-    class_weights: "[0.7,1.0]"
+    gene_dna_sequences: "preprocessing/yeast_genome/gene_DNA_sequences_ordered.tsv" 
+    tf_dna_sequences: "preprocessing/yeast_genome/TF_info_scores_with_DBID_and_missing_sequences.tsv"
+    class_weights: [0.7,1.0]
     use_even_class_sampler: True
-    tokenized_data_dir: "/vast/csg337/pmf-grn-3dc/data/hg38/tokenized_data/"
-    gene_tf_prior_data: "TRRUST_prior_gene_TF_edge_matrix.tsv"
+    tokenized_data_dir: "/vast/csg337/pmf-grn-3dc/data/yeast/tokenized_data/"
+    gene_tf_prior_data: "data/yeast/YEASTRACT_20190713_BOTH.tsv"
     max_length: 512
     new_experiment: True
     use_ddp: False
