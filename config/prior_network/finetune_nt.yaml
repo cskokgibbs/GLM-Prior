@@ -1,0 +1,56 @@
+training_args:
+  learning_rate: 1e-5
+  per_device_train_batch_size: 32
+  per_device_eval_batch_size: 16
+  # eval_accumulation_steps: 8
+  gradient_accumulation_steps: 32
+  output_dir: ???
+  logging_steps: 1
+  num_train_epochs: 1
+  report_to: "wandb"
+  seed: 0
+  do_eval: True
+  eval_strategy: "steps"
+  save_strategy: "steps"
+  eval_steps: 0.05
+  save_steps: 0.1
+  include_inputs_for_metrics: True
+  log_level: "info"
+  logging_first_step: True
+  label_names: ["labels"]
+  load_best_model_at_end: True
+  save_total_limit: 2
+  metric_for_best_model: "best_f1_from_thresholding"
+  greater_is_better: True
+  dataloader_drop_last: False
+  ddp_backend: "gloo"
+  local_rank: -1
+
+# other args
+script_args:
+  model_name_or_path: "InstaDeepAI/nucleotide-transformer-v2-250m-multi-species"
+  gene_tf_prior_data: "data/yeast/YEASTRACT_20190713_BOTH.tsv"
+  gold_standard_data: "data/yeast/gold_standard.tsv"
+  gene_dna_sequences: "preprocessing/yeast_genome/gene_DNA_sequences_ordered.tsv"
+  tf_dna_sequences: "preprocessing/yeast_genome/TF_info_scores_with_DBID_and_missing_sequences.tsv"
+  train_prop: 0.99
+  downsample_rate: 0.4
+  max_eval_examples: 10000 # limit the number of eval examples if there are too many
+  max_length: 512
+  wandb_project: "prior_network"
+  wandb_run_name: ???
+  wandb_entity: "pmf-grn-3dc"
+  sanity_check: False
+  torch_dtype: null
+  class_weights: [0.7, 1.0]
+  new_experiment: False # set to true for sanity check
+  round_num: 0 # controls pushing to hf in dual-stage training
+  hf_repo: cskokgibbs/yeast-pre-tokenized-NT
+  tokenized_data_dir: "/vast/csg337/pmf-grn-3dc/data/yeast/tokenized_data/" # place to store tokenized data
+  classification_threshold: 0.5 # threshold used for the reference data!
+  use_even_class_sampler: True
+  use_ddp: True
+  num_gpus: 4 
+  cache_tokenized_sequences_repo: cskokgibbs/yeast-pretokenized-NT-cache
+  cache_tokenized_sequences_file_1: yeast-pre-tokenized-NT-cache-part1.pt
+  cache_tokenized_sequences_file_2: yeast-pre-tokenized-NT-cache-part2.pt
