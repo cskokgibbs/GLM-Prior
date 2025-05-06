@@ -9,14 +9,16 @@ GLM-Prior paper.
 ------------
 ## Installation Steps
 Please create the following Conda environment within a singularity container:
-`conda create -p /ext3/pmf-prior-network python=3.10 -y`
-`pip install torch==2.3.1 torchvision==0.18.1 torchaudio==2.3.1 --index-url https://download.pytorch.org/whl/cu121`
-`pip install hydra-core pandas`
-`pip install datasets`
-`pip install scikit-learn`
-`pip install transformers`
-`pip install transformers[torch]`
-`pip install wandb`
+```
+conda create -p /ext3/pmf-prior-network python=3.10 -y
+pip install torch==2.3.1 torchvision==0.18.1 torchaudio==2.3.1 --index-url https://download.pytorch.org/whl/cu121
+pip install hydra-core pandas
+pip install datasets
+pip install scikit-learn
+pip install transformers
+pip install transformers[torch]
+pip install wandb
+```
 
 To use this environment, run the following command:
 ```
