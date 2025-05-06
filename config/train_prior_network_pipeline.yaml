@@ -33,8 +33,8 @@ prior_network_training:
     per_device_train_batch_size: 32
   script_args:
     downsample_rate: 1.0
-    gene_dna_sequences: "preprocessing/yeast_genome/gene_DNA_sequences_ordered.tsv" 
-    tf_dna_sequences: "preprocessing/yeast_genome/TF_info_scores_with_DBID_and_missing_sequences.tsv"
+    gene_dna_sequences: "data/yeast/gene_DNA_sequences_ordered.tsv" 
+    tf_dna_sequences: "data/yeast/TF_info_scores_with_DBID_and_missing_sequences.tsv"
     class_weights: [0.7,1.0]
     use_even_class_sampler: True
     tokenized_data_dir: "/vast/csg337/pmf-grn-3dc/data/yeast/tokenized_data/"

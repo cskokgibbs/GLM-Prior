@@ -31,8 +31,8 @@ script_args:
   model_name_or_path: "InstaDeepAI/nucleotide-transformer-v2-250m-multi-species"
   gene_tf_prior_data: "data/yeast/YEASTRACT_20190713_BOTH.tsv"
   gold_standard_data: "data/yeast/gold_standard.tsv"
-  gene_dna_sequences: "preprocessing/yeast_genome/gene_DNA_sequences_ordered.tsv"
-  tf_dna_sequences: "preprocessing/yeast_genome/TF_info_scores_with_DBID_and_missing_sequences.tsv"
+  gene_dna_sequences: "data/yeast/gene_DNA_sequences_ordered.tsv"
+  tf_dna_sequences: "data/yeast/TF_info_scores_with_DBID_and_missing_sequences.tsv"
   train_prop: 0.99
   downsample_rate: 0.4
   max_eval_examples: 10000 # limit the number of eval examples if there are too many
