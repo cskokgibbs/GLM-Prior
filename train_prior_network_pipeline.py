@@ -11,11 +11,6 @@ import scanpy as sc
 import sys
 import wandb
 
-from driver.drive import Pipeline as DriverPipeline
-from evaluate import main as evaluate_main
-from evaluate_calibration import evaluate_calibration
-
-from get_hp_search_results import process_log_files
 from omegaconf import DictConfig, OmegaConf
 from pprint import pformat
 from process_utils import (

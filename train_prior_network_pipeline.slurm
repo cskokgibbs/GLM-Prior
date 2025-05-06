@@ -5,8 +5,8 @@
 #SBATCH --export=NONE
 #SBATCH --mem=50GB
 #SBATCH --time=147:00:00
-#SBATCH --output=./${1}/slurm_output/%x_%j.out
-#SBATCH --error=./${1}/slurm_output/%x_%j.err
+#SBATCH --output=./TPN/slurm_output/%x_%j.out
+#SBATCH --error=./TPN/slurm_output/%x_%j.err
 #SBATCH --mail-user=%u@nyu.edu
 
 # args 1: name of working dir
