@@ -4,7 +4,7 @@
 This repository and its references contain the models, data, and scripts used to perform the experiments in the 
 GLM-Prior paper.
 
-![GLM-Prior](dual-stage-schematic.pngpng)
+![GLM-Prior](dual-stage-schematic.png)
 
 ------------
 ## Installation Steps
