@@ -1,0 +1,48 @@
+defaults:
+  - prior_network: finetune_nt
+  - modules: gaussian3m
+
+sanity_check: False
+working_dir: ???
+num_training_rounds: 1 # will total 2x num. of training rounds, since
+                        # we alternate between training prior network and PMFGRN
+overwrite: False
+prior_network_singularity_overlay: /scratch/csg337/pmf-grn-3dc/envs/overlay-15GB-500K.ext3
+prior_network_singularity_img: /scratch/work/public/singularity/cuda12.1.1-cudnn8.9.0-devel-ubuntu22.04.2.sif
+prior_network_initial_model: "InstaDeepAI/nucleotide-transformer-v2-250m-multi-species"
+prior_network_num_inference_jobs: 4
+prior_network_inference_singularity_overlay: /scratch/csg337/envs/overlay-25GB-500K.ext3
+prior_network_inference_singularity_img: /scratch/work/public/singularity/cuda11.8.86-cudnn8.7-devel-ubuntu22.04.2.sif
+gold_fp: data/yeast/gold_standard.tsv
+email: null
+slurm_output_dir: null
+log_level: info
+seed: 0
+num_seed_bits: 10  # how many bits to use to generate subsequence random seeds
+wandb_entity: "pmf-grn-3dc"
+
+
+# will override configs in config/prior_network/finetune_nt.yaml
+prior_network_training:
+  training_args:
+    learning_rate: 1e-5
+    do_eval: True
+    eval_strategy: "steps"
+    eval_steps: 0.05
+    save_steps: 0.1
+    logging_steps: 1
+    per_device_train_batch_size: 32
+  script_args:
+    downsample_rate: 1.0
+    gene_dna_sequences: "preprocessing/hg38/hg38_gene_DNA_sequences.tsv" 
+    tf_dna_sequences: "preprocessing/hg38/hg38_TF_info_scores_with_DBID.tsv"
+    class_weights: "[0.7,1.0]"
+    use_even_class_sampler: True
+    tokenized_data_dir: "/vast/csg337/pmf-grn-3dc/data/hg38/tokenized_data/"
+    gene_tf_prior_data: "TRRUST_prior_gene_TF_edge_matrix.tsv"
+    max_length: 512
+    new_experiment: True
+    use_ddp: False
+    num_gpus: 1 # 1 will run regular training mode without ddp
+ 
+
