@@ -43,7 +43,8 @@ Notebooks for each of the three species (yeast, mouse and human) can be found in
 Instructions and links on necessary genome, fasta, motif and adjacent datasets to download can be found within each of the respective notebooks.
 
 ## Datasets
-Yeast datasets used in the GLM-Prior paper can be found under `data/yeast`. Remaining datasets from the paper can be downloaded from [BEELINE](https://zenodo.org/records/3701939). For `data/human` and `data/mouse`, data can be downloaded from ...
+Yeast datasets used in the GLM-Prior paper can be found under `data/yeast`. Remaining datasets from the paper can be downloaded from [BEELINE](https://zenodo.org/records/3701939).
+For human and mouse datasets, with paths `data/human` and `data/mouse`, data can be downloaded from ...
 
 ## GLM-Prior Pipeline (stage 1 of the dual-stage training pipeline)
 To train a prior network from DNA sequences corresponding to transcription factors and target genes in a species or cell line of interest:
@@ -74,4 +75,4 @@ A weights and biases project will be created to visualize the results of the hyp
 
 ## GRN inference with PMF-GRN (stage 2 of the dual-stage training pipeline)
 
-Once a prior-knowledge matrix has been inferred, GRN inference can be run using [PMF-GRN](https://github.com/nyu-dl/pmf-grn), the second stage of the dual-stage training pipeline.
+Once a prior-knowledge matrix has been inferred, GRN inference can be run using [PMF-GRN](https://github.com/nyu-dl/pmf-grn), the second stage of the dual-stage training pipeline. 
