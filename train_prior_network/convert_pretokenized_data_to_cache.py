@@ -28,11 +28,12 @@ def cache_pretokenized_data(pretokenized_data: str, output_dir: str, output_file
             repo_id=pretokenized_data,
             repo_type="dataset"
             )
-        parquet_files = [f for f in files_in_repo if f.startswith("data/") and f.endswith(".parquet")]
     except RepositoryNotFoundError:
         api.create_repo(repo_id=pretokenized_data, repo_type="dataset", private=False)
         print(f"Created new Hugging Face dataset repo: {pretokenized_data}")
         files_in_repo = []
+
+    parquet_files = [f for f in files_in_repo if f.startswith("data/") and f.endswith(".parquet")]
 
     datasets_list = []
     for file_name in parquet_files:
@@ -41,7 +42,7 @@ def cache_pretokenized_data(pretokenized_data: str, output_dir: str, output_file
         ds = Dataset.from_pandas(df)
         datasets_list.append(ds)
     
-    if dataset_list:
+    if datasets_list:
         ds = concatenate_datasets(datasets_list)
         ds = load_dataset(pretokenized_data, split="train")
     else:
