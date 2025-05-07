@@ -8,6 +8,7 @@ from collections import defaultdict
 from datasets import Dataset, concatenate_datasets, load_dataset
 from tensor_utils import remove_padding
 from huggingface_hub import HfApi, hf_hub_download
+from huggingface_hub.utils import RepositoryNotFoundError
 from tqdm import tqdm
 
 def cache_pretokenized_data(pretokenized_data: str, output_dir: str, output_filename: str):
@@ -45,7 +46,7 @@ def cache_pretokenized_data(pretokenized_data: str, output_dir: str, output_file
         ds = load_dataset(pretokenized_data, split="train")
     else:
         raise ValueError("No parquet files found in the dataset repository to cache.")
-        
+
     for ex in tqdm(ds, desc="Caching..."):
         d = {
             "input_ids": torch.LongTensor(ex["input_ids"]),
