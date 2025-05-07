@@ -116,7 +116,7 @@ def manage_cache(script_args, output_dir, tokenized_data_dir, load=False):
         else:
             # Upload the single cache file
             api.upload_file(
-                path_or_fileobj=cache_file_path,
+                path_or_fileobj=cache_file_path_1,
                 path_in_repo=script_args.cache_tokenized_sequences_file_1,
                 repo_id=script_args.cache_tokenized_sequences_repo,
                 repo_type="dataset",
