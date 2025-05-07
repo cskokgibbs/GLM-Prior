@@ -45,6 +45,8 @@ def main(cfg: DictConfig):
     
     logger.info(f"Saving full tokenized dataset for prior to {training_args.output_dir}")
     full_ds.save_to_disk(training_args.output_dir)
+    logger.info(f"Pushing tokenized dataset to Hugging Face repo: {script_args.hf_repo}")
+    full_ds.push_to_hub(script_args.hf_repo)
     # create a cache
     manage_cache(script_args, training_args.output_dir, script_args.tokenized_data_dir, load=False)
 
