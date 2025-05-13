@@ -68,13 +68,13 @@ For mouse and human reference datasets, download from [BEELINE](https://zenodo.o
 
 ## GLM-Prior Training Pipeline (Stage 1)
 To train the GLM-Prior model on DNA sequence input:
-1. Edit configuration files with appropriate file paths and optimal hyperparameters for full training:
+### 1. Edit configuration files with appropriate file paths and optimal hyperparameters for full training:
 - `config/train_prior_network_pipeline.yaml`
 - `config/prior_network/finetune_nt.yaml`
-2. Set Singularity paths in `config/train_prior_network_pipeline.yaml`
+### 2. Set Singularity paths in `config/train_prior_network_pipeline.yaml`
 - `prior_network_singularity_overlay` - overlay path for environment
 - `prior_network_singularity_img` - path to Singularity image
-3. Launch training pipeline:
+### 3. Launch training pipeline:
 `sbatch train_prior_network_pipeline.slurm TPN_pipeline`
 This will launch dynamic slurm scripts to:
 - Tokenize sequences
@@ -87,7 +87,7 @@ This will launch dynamic slurm scripts to:
 
 ## 🔍 Hyperparameter Sweep
 To optimize GLM-Prior for a new dataset, run a hyperparameter sweep:
-1. Modify sweep parameters:
+### 1. Modify sweep parameters:
 Edit `./train_prior_network/finetune_nt_hp_sweep.sh` for:
 - class weights
 - learning rates
@@ -95,7 +95,7 @@ Edit `./train_prior_network/finetune_nt_hp_sweep.sh` for:
 - gradient accumulation steps
 Confirm paths and set `num_train_epochs: 1` in `config/prior_network/finetune_nt.yaml`
 
-2. Submit sweep jobs
+### 2. Submit sweep jobs
 ```
 ./train_prior_network/finetune_nt_hp_sweep.sh $USER /scratch/$USER/GLM-Prior/envs/overlay-15GB-500K.ext3 /scratch/work/public/singularity/cuda12.1.1-cudnn8.9.0-devel-ubuntu22.04.2.sif ./train_prior_network/hp-sweep/
 ```
