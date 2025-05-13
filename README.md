@@ -1,79 +1,106 @@
-# GLM-Prior: 
-A transformer-based nucleotide sequence classification approach for inferring biologically informed prior-knowledge
+# GLM-Prior: A Transformer-Based Approach for Biologically Informed Prior-Knowledge
 -----------
 
-This repository and its references contain the models, data, and scripts used to perform the experiments in the 
-GLM-Prior paper.
+This repository contains the models, data, and scripts used in the GLM-Prior paper, which introduces a transformer-based nucleotide sequence classification approach for inferring transcription factor–target gene interaction priors.
+
+GLM-Prior is the first stage in a **dual-stage training pipeline** that includes:
+
+1. **GLM-Prior** – a fine-tuned genomic language model that predicts TF–gene interactions from nucleotide sequences.
+2. **PMF-GRN** – a probabilistic matrix factorization model that performs GRN inference using prior knowledge from GLM-Prior.
+
 
 ![GLM-Prior](dual-stage-schematic.png)
 
-------------
-## Installation Steps
-Please create the following Conda environment within a singularity container:
+---
+
+## Table of Contents
+- [Environment Setup](#environment-setup)
+- [Dataset Preparation](#dataset-preparation)
+- [GLM-Prior Pipeline (Stage 1)](#glm-prior-pipeline-stage-1)
+- [Hyperparameter Sweep](#hyperparameter-sweep)
+- [GRN Inference with PMF-GRN (Stage 2)](#grn-inference-with-pmf-grn-stage-2)
+
+---
+
+## 🌳 Environment Setup
+GLM-Prior is designed to run within a **Singularity container** using a Conda environment. Follow the steps below to create and activate the environment:
+
+### 1. Create Conda Environment
 ```
 conda create -p /ext3/pmf-prior-network python=3.10 -y
+```
+
+### 2. Install Required Packages
+```
 pip install torch==2.3.1 torchvision==0.18.1 torchaudio==2.3.1 --index-url https://download.pytorch.org/whl/cu121
-pip install hydra-core pandas
-pip install datasets
-pip install scikit-learn
-pip install transformers
-pip install transformers[torch]
-pip install wandb
+pip install hydra-core pandas datasets scikit-learn transformers wandb
 ```
 
-To use this environment, run the following command:
+### 3. Launch Singularity Container
 ```
-singularity exec --nv --overlay /scratch/$USER/GLM-Prior/envs/overlay-15GB-500K.ext3:ro \
---bind /scratch/$USER/GLM-Prior/envs/local:$HOME/.local \
-/scratch/work/public/singularity/cuda12.1.1-cudnn8.9.0-devel-ubuntu22.04.2.sif /bin/bash
-``` 
+singularity exec --nv --overlay overlay-15GB-500K.ext3:ro --bind local:$HOME/.local cuda12.1.1-cudnn8.9.0-devel-ubuntu22.04.2.sif /bin/bash
+```
 
-Then, please install the remaining requirements using the `environment_prior_network.yaml` file:
+### 4. Final Environment Installations
 ```
 conda env update --prefix /ext3/pmf-prior-network --file environment_prior_network.yaml --prune
 ```
 
-Finally, activate by sourcing the environment:
+### 5. Activate the Environment
 ```
 source /ext3/env.sh
 conda activate /ext3/pmf-prior-network
 ```
 
-## Create gene and TF sequence files and priors associated with the GLM-Prior paper:
-Notebooks for each of the three species (yeast, mouse and human) can be found in the `create_sequence_datasets/` folder. 
-Instructions and links on necessary genome, fasta, motif and adjacent datasets to download can be found within each of the respective notebooks.
+## 🧬 Dataset Preparation
+To prepare training data, use the notebooks provided in the `create_sequence_datasets/` directory. There are separate notebooks for yeast, mouse, and human.
+Each notebook:
+- Lists required downloads (FASTA files, GTF annotations, TF motifs)
+- Walks through generating gene/TF sequences
+- Saves output sequences and prior matrices for model input
 
-## Datasets
-Yeast datasets used in the GLM-Prior paper can be found under `data/yeast`. Remaining datasets from the paper can be downloaded from [BEELINE](https://zenodo.org/records/3701939).
-For human and mouse datasets, with paths `data/human` and `data/mouse`, data can be downloaded from ...
+Dataset Locations:
+- Yeast: `data/yeast/`
+- Mouse: `data/mouse/`
+- Human: `data/human/`
 
-## GLM-Prior Pipeline (stage 1 of the dual-stage training pipeline)
-To train a prior network from DNA sequences corresponding to transcription factors and target genes in a species or cell line of interest:
-Step 1: Specify correct file paths in `config/train_prior_network_pipeline.yaml` and `config/prior_network/finetune_nt.yaml`
-Step 2: Change the values for the singularity options in `config/train_prior_network_pipeline.yaml`. The options `prior_network_singularity_overlay` and `prior_network_singularity_img` should correspond to the Conda environment `pmf-prior-network`.
-Step 3: Run the pipeline using the following command: `sbatch train_prior_network_pipeline.slurm TPN_pipeline`, where the second argument will specify which directory the experiment should be saved into.
+For mouse and human reference datasets, download from [BEELINE](https://zenodo.org/records/3701939).
 
-The pipeline will dynamically create scripts to 
-1. Create a tokenized dataset
-2. Train GLM-Prior
-3. Run inference on specified gene and TF sequences
-4. Compute AUPRC of inferred GLM-Prior against a specified gold standard.
+## GLM-Prior Training Pipeline (Stage 1)
+To train the GLM-Prior model on DNA sequence input:
+1. Edit configuration files with appropriate file paths and optimal hyperparameters for full training:
+- `config/train_prior_network_pipeline.yaml`
+- `config/prior_network/finetune_nt.yaml`
+2. Set Singularity paths in `config/train_prior_network_pipeline.yaml`
+- `prior_network_singularity_overlay` - overlay path for environment
+- `prior_network_singularity_img` - path to Singularity image
+3. Launch training pipeline:
+`sbatch train_prior_network_pipeline.slurm TPN_pipeline`
+This will launch dynamic slurm scripts to:
+- Tokenize sequences
+- Train GLM-Prior
+- Perform inference on gene-TF pairs
+- Evaluate predictions vs. a gold standard
+- Save outputs to:
+`output/<experiment_name>/prior_network_predictions.tsv`
+`output/<experiment_name>/auprc_vs_gold.json`
 
-The inferred prior-network can be found in the output directory under `prior_network_predictions.tsv`. To binarize this prior-knowledge for downstream GRN inference, please use the optimal classification threshold obtained during training. Performance metrics will be logged to a specified weights and biases project, and final AUPRC will be saved to a `auprc_vs_gold.json` file in the output directory.
+## 🔍 Hyperparameter Sweep
+To optimize GLM-Prior for a new dataset, run a hyperparameter sweep:
+1. Modify sweep parameters:
+Edit `./train_prior_network/finetune_nt_hp_sweep.sh` for:
+- class weights
+- learning rates
+- downsampling rates
+- gradient accumulation steps
+Confirm paths and set `num_train_epochs: 1` in `config/prior_network/finetune_nt.yaml`
 
-## Hyperparameter sweep for new datasets
-To run a hyperparameter sweep on a new dataset and obtain the optimal hyperparameters for full training, we recommend sweeping over different values of class-weights and downsampling rates. Learning rates and gradient accumulation steps are also possible parameters to sweep over. To modify default sweep values, please modify the file `./train_prior_network/finetune_nt_hp_sweep.sh`. 
-
-In the `config/prior_network/finetune_nt.yaml` file, please confirm all file paths are correct and that `num_train_epochs` is set to 1.
-
-Submit dynamically created slurm jobs using the following command (1 job per sweep-run):
-
+2. Submit sweep jobs
 ```
 ./train_prior_network/finetune_nt_hp_sweep.sh $USER /scratch/$USER/GLM-Prior/envs/overlay-15GB-500K.ext3 /scratch/work/public/singularity/cuda12.1.1-cudnn8.9.0-devel-ubuntu22.04.2.sif ./train_prior_network/hp-sweep/
 ```
+Each configuration will be submitted as an individual SLURM job. Weights & Biases will automatically track all sweeps. Select the configuration with the best F1 score and update your training config accordingly.
 
-A weights and biases project will be created to visualize the results of the hyperparameter sweep. Select the parameters corresponding to the run that achieved the best F1 score in Charts section
-
-## GRN inference with PMF-GRN (stage 2 of the dual-stage training pipeline)
-
-Once a prior-knowledge matrix has been inferred, GRN inference can be run using [PMF-GRN](https://github.com/nyu-dl/pmf-grn), the second stage of the dual-stage training pipeline. 
+## 🧠 GRN Inference with PMF-GRN (Stage 2)
+Binarized prior-knowledge can be used as input for the [PMF-GRN](https://github.com/nyu-dl/pmf-grn) model to perform full GRN inference.
+- PMF-GRN takes this prior-knowledge matrix and single cell gene expression data to infer directed regulatory edges between TFs and their target genes 
