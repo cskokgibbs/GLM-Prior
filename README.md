@@ -110,15 +110,15 @@ Binarized prior-knowledge can be used as input for the [PMF-GRN](https://github.
 Datasets and models associated with the paper can be found on HuggingFace
 
 ### Models
-[Yeast](https://huggingface.co/cskokgibbs/yeast-best-model)
-[Mouse](https://huggingface.co/cskokgibbs/BEELINE-mouse)
-[Human](https://huggingface.co/cskokgibbs/BEELINE-human)
-[Transfer-Learning-Human-To-Mouse](https://huggingface.co/cskokgibbs/Transfer-Learning-Human-To-Mouse)
-[Transfer-Learning-Mouse-To-Human](https://huggingface.co/cskokgibbs/Transfer-Learning-Mouse-To-Human)
-[Transfer-Learning-Human-And-Mouse-To-Yeast](https://huggingface.co/cskokgibbs/Transfer-Learning-Human-And-Mouse-To-Yeast)
-[Multi-Species](https://huggingface.co/cskokgibbs/Multi-Species)
+- [Yeast](https://huggingface.co/cskokgibbs/yeast-best-model)
+- [Mouse](https://huggingface.co/cskokgibbs/BEELINE-mouse)
+- [Human](https://huggingface.co/cskokgibbs/BEELINE-human)
+- [Transfer-Learning-Human-To-Mouse](https://huggingface.co/cskokgibbs/Transfer-Learning-Human-To-Mouse)
+- [Transfer-Learning-Mouse-To-Human](https://huggingface.co/cskokgibbs/Transfer-Learning-Mouse-To-Human)
+- [Transfer-Learning-Human-And-Mouse-To-Yeast](https://huggingface.co/cskokgibbs/Transfer-Learning-Human-And-Mouse-To-Yeast)
+- [Multi-Species](https://huggingface.co/cskokgibbs/Multi-Species)
 
 ### Inferred GRNs
-[Yeast](https://huggingface.co/datasets/cskokgibbs/yeast-GRNs)
-[Mouse-ESCs](https://huggingface.co/datasets/cskokgibbs/mESC-GRNs)
-[Human-ESCs](https://huggingface.co/datasets/cskokgibbs/hESC-GRNs)
+- [Yeast](https://huggingface.co/datasets/cskokgibbs/yeast-GRNs)
+- [Mouse-ESCs](https://huggingface.co/datasets/cskokgibbs/mESC-GRNs)
+- [Human-ESCs](https://huggingface.co/datasets/cskokgibbs/hESC-GRNs)
