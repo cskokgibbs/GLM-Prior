@@ -19,6 +19,7 @@ GLM-Prior is the first stage in a **dual-stage training pipeline** that includes
 - [GLM-Prior Pipeline (Stage 1)](#glm-prior-pipeline-stage-1)
 - [Hyperparameter Sweep](#hyperparameter-sweep)
 - [GRN Inference with PMF-GRN (Stage 2)](#grn-inference-with-pmf-grn-stage-2)
+- [Datasets and Models](#datasets-and-models)
 
 ---
 
@@ -104,3 +105,20 @@ Each configuration will be submitted as an individual SLURM job. Weights & Biase
 ## 🧠 GRN Inference with PMF-GRN (Stage 2)
 Binarized prior-knowledge can be used as input for the [PMF-GRN](https://github.com/nyu-dl/pmf-grn) model to perform full GRN inference.
 - PMF-GRN takes this prior-knowledge matrix and single cell gene expression data to infer directed regulatory edges between TFs and their target genes 
+
+## 🧬 Datasets and Models
+Datasets and models associated with the paper can be found on HuggingFace
+
+### Models
+[Yeast](https://huggingface.co/cskokgibbs/yeast-best-model)
+[Mouse](https://huggingface.co/cskokgibbs/BEELINE-mouse)
+[Human](https://huggingface.co/cskokgibbs/BEELINE-human)
+[Transfer-Learning-Human-To-Mouse](https://huggingface.co/cskokgibbs/Transfer-Learning-Human-To-Mouse)
+[Transfer-Learning-Mouse-To-Human](https://huggingface.co/cskokgibbs/Transfer-Learning-Mouse-To-Human)
+[Transfer-Learning-Human-And-Mouse-To-Yeast](https://huggingface.co/cskokgibbs/Transfer-Learning-Human-And-Mouse-To-Yeast)
+[Multi-Species](https://huggingface.co/cskokgibbs/Multi-Species)
+
+### Inferred GRNs
+[Yeast](https://huggingface.co/datasets/cskokgibbs/yeast-GRNs)
+[Mouse-ESCs](https://huggingface.co/datasets/cskokgibbs/mESC-GRNs)
+[Human-ESCs](https://huggingface.co/datasets/cskokgibbs/hESC-GRNs)
