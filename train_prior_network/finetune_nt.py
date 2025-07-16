@@ -439,6 +439,23 @@ def main(cfg: DictConfig):
     saved_thresholds_fp = os.path.join(
         training_args.output_dir, "f1s_and_thresholds.jsonl"
     )
+    
+    trainer = InteractionsTrainerImbalancedClasses(
+        model,
+        training_args,
+        train_ds,
+        dev_ds,
+        tokenizer,
+        compute_metrics=lambda eval_pred: compute_metrics(
+            eval_pred, cfg.script_args.classification_threshold, saved_thresholds_fp
+        ),
+        script_args=script_args,
+    )
+
+    trainer.evaluate()
+    trainer.train()
+
+    trainer.save_model(training_args.output_dir)
       
     ####################### predict and evaluate #######################
 
@@ -456,23 +473,6 @@ def main(cfg: DictConfig):
         evaluation_df.shape,
     )
     save_interaction_matrix(evaluation_df, training_args.output_dir)
-
-    trainer = InteractionsTrainerImbalancedClasses(
-        model,
-        training_args,
-        train_ds,
-        dev_ds,
-        tokenizer,
-        compute_metrics=lambda eval_pred: compute_metrics(
-            eval_pred, cfg.script_args.classification_threshold, saved_thresholds_fp
-        ),
-        script_args=script_args,
-    )
-
-    trainer.evaluate()
-    trainer.train()
-
-    trainer.save_model(training_args.output_dir)
 
 if __name__ == "__main__":
     main()
