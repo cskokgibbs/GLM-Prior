@@ -24,7 +24,7 @@ GLM-Prior is the first stage in a **dual-stage training pipeline** that includes
 ---
 
 ## 🌳 Environment Setup
-GLM-Prior is designed to run within a **Singularity container** using a Conda environment. Follow the steps below to create and activate the environment:
+GLM-Prior is designed to run within a **Singularity container** using a Conda environment. Follow the steps below to create and activate the environment. Installation time is approximately less than 5 minutes.
 
 ### 1. Create Conda Environment
 ```
@@ -87,7 +87,7 @@ This will launch dynamic slurm scripts to:
 `output/<experiment_name>/auprc_vs_gold.json`
 
 ## 🔍 Hyperparameter Sweep
-To optimize GLM-Prior for a new dataset, run a hyperparameter sweep:
+To optimize GLM-Prior for a new dataset, we recommend running a pre-training hyperparameter sweep over 1 epoch. To run a hyperparameter sweep:
 ### 1. Modify sweep parameters:
 Edit `./train_prior_network/finetune_nt_hp_sweep.sh` for:
 - class weights
@@ -104,7 +104,7 @@ Each configuration will be submitted as an individual SLURM job. Weights & Biase
 
 ## 🧠 GRN Inference with PMF-GRN (Stage 2)
 Binarized prior-knowledge can be used as input for the [PMF-GRN](https://github.com/nyu-dl/pmf-grn) model to perform full GRN inference.
-- PMF-GRN takes this prior-knowledge matrix and single cell gene expression data to infer directed regulatory edges between TFs and their target genes 
+- PMF-GRN takes this prior-knowledge matrix and single cell gene expression data to infer directed regulatory edges between TFs and their target genes. The output of PMF-GRN includes a gene regulatory network and transcription factor activity for all genes and TFs, as well as metrics such as uncertainty calibration and AUPRC.
 
 ## 🧬 Datasets and Models
 Datasets and models associated with the paper can be found on HuggingFace
