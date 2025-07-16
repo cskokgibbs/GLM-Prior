@@ -64,6 +64,7 @@ Dataset Locations:
 - Yeast: `data/yeast/`
 - Mouse: `data/mouse/`
 - Human: `data/human/`
+  Datasets for [human](https://huggingface.co/datasets/cskokgibbs/human_datasets/tree/main) and [mouse](https://huggingface.co/datasets/cskokgibbs/mouse_datasets) can be downloaded and placed into their respective folders.
 
 For mouse and human reference datasets, download from [BEELINE](https://zenodo.org/records/3701939).
 
