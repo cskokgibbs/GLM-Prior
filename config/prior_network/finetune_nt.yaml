@@ -1,10 +1,10 @@
 training_args:
   learning_rate: 1e-5
   per_device_train_batch_size: 32
-  per_device_eval_batch_size: 16
+  per_device_eval_batch_size: 32
   # eval_accumulation_steps: 8
-  gradient_accumulation_steps: 32
-  output_dir: ???
+  gradient_accumulation_steps: 16
+  output_dir: "/vast/csg337/pmf-grn-3dc/data/yeast/no_GTL_overlap/tokenized_data/"
   logging_steps: 1
   num_train_epochs: 1
   report_to: "wandb"
@@ -29,28 +29,31 @@ training_args:
 # other args
 script_args:
   model_name_or_path: "InstaDeepAI/nucleotide-transformer-v2-250m-multi-species"
-  gene_tf_prior_data: "data/yeast/YEASTRACT_20190713_BOTH.tsv"
+  gene_tf_prior_data: "/vast/csg337/pmf-grn-3dc/data/yeast/no_GTL_overlap/YEASTRACT_no_gene_tf_label_overlaps.tsv" #"data/mouse/Mouse_prior_knowledge_STRING_and_TRRUST_NEW.tsv"
+  validation_data: False
   gold_standard_data: "data/yeast/gold_standard.tsv"
-  gene_dna_sequences: "data/yeast/gene_DNA_sequences_ordered.tsv"
-  tf_dna_sequences: "data/yeast/TF_info_scores_with_DBID_and_missing_sequences.tsv"
+  gene_dna_sequences: "/vast/csg337/pmf-grn-3dc/data/yeast/no_GTL_overlap/yeast_gene_DNA_sequences_no_GTL_overlap.tsv" #"data/yeast/gene_DNA_sequences_ordered.tsv"
+  tf_dna_sequences: "/vast/csg337/pmf-grn-3dc/data/yeast/no_GTL_overlap/yeast_TF_DNA_sequences_no_GTL_overlap.tsv" #"data/yeast/TF_info_scores_with_DBID_and_missing_sequences.tsv"
   train_prop: 0.99
   downsample_rate: 0.4
-  max_eval_examples: 10000 # limit the number of eval examples if there are too many
+  max_eval_examples: 1000 # limit the number of eval examples if there are too many
   max_length: 512
-  wandb_project: "prior_network"
-  wandb_run_name: ???
+  wandb_project: "2-yeast-no-GTL"
+  wandb_run_name: "test"
   wandb_entity: "pmf-grn-3dc"
   sanity_check: False
   torch_dtype: null
   class_weights: [0.7, 1.0]
   new_experiment: False # set to true for sanity check
   round_num: 0 # controls pushing to hf in dual-stage training
-  hf_repo: cskokgibbs/yeast-pre-tokenized-NT
-  tokenized_data_dir: "/vast/csg337/pmf-grn-3dc/data/yeast/tokenized_data/" # place to store tokenized data
+  hf_repo: cskokgibbs/yeast-no-GTL-overlap-pre-tokenized-NT #"cskokgibbs/BEELINE-mouse-pretokenized-NT" #cskokgibbs/yeast-pre-tokenized-NT
+  tokenized_data_dir: "/vast/csg337/pmf-grn-3dc/data/yeast/no_GTL_overlap/tokenized_data/" #"/vast/csg337/pmf-grn-3dc/data/yeast/tokenized_data/" # place to store tokenized data
   classification_threshold: 0.5 # threshold used for the reference data!
   use_even_class_sampler: True
-  use_ddp: True
-  num_gpus: 4 
-  cache_tokenized_sequences_repo: cskokgibbs/yeast-pretokenized-NT-cache
-  cache_tokenized_sequences_file_1: yeast-pre-tokenized-NT-cache-part1.pt
-  cache_tokenized_sequences_file_2: yeast-pre-tokenized-NT-cache-part2.pt
+  use_ddp: False
+  num_gpus: 1
+  cache_tokenized_sequences_repo: cskokgibbs/yeast-no-GTL-overlap-pretokenized-NT-cache #cskokgibbs/yeast-no-GTL-overlap-pretokenized-NT-cache #cskokgibbs/yeast-pretokenized-NT-cache
+  cache_tokenized_sequences_file_1: yeast-no-GTL-overlap-pre-tokenized-NT-cache-part1.pt #yeast-pre-tokenized-NT-cache-part1.pt
+  cache_tokenized_sequences_file_2:  #yeast-no-GTL-overlap-pre-tokenized-NT-cache-part2.pt
+  saved_downsampled: False
+  load_downsampled_dir: ""

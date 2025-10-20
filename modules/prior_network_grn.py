@@ -1,17 +1,13 @@
 import gc
 import logging
 import numpy as np
-import pyro
-import pyro.distributions as dist
 import random
 import torch
 
-from .pmf import PMF, log_gpu_memory
 from tensor_utils import collate_tensors
 
 from contextlib import nullcontext
 from itertools import product
-from pyro.nn import PyroModule
 from tqdm import tqdm
 from torch import nn
 from torch.distributions import constraints
@@ -312,253 +308,22 @@ class PriorNetwork(nn.Module):
         output_tensor = torch.stack(output_tensor)
         return output_tensor
 
-
-class PriorNetworkPMF(PMF):
-    def __init__(
-        self,
-        num_u: int,
-        dim_u: int,
-        V_prior_hparams: torch.tensor,
-        dataset_size: int,
-        prior_mean_log_U: float = 0.0,
-        prior_std_log_U: float = 1.0,
-        U_max: float = None,
-        truncate_U: bool = False,
-        guide_max_mean_log_U: float = 100,
-        guide_max_std_log_U: float = 10,
-        prior_std_logit_A: float = 1.0,
-        prior_std_B: float = 1.0,
-        use_gpu: bool = False,
-        use_mask: bool = False,
-        eps: float = 1e-6,
-        min_prior_hparam: float = 0.01,
-        max_prior_hparam: float = 0.99,
-        model_name_or_path: str = "InstaDeepAI/nucleotide-transformer-v2-250m-multi-species",
-        gene_dna_sequences: List[str] = None,
-        gene_names: List[str] = None,
-        tf_dna_sequences: List[Union[str, List[str]]] = None,
-        tf_ids: List[str] = None,
-        gpu_batch_size: int = 16,
-        initialize_similarity_matrix: bool = True,
-        sim_matrix_mask_rate: float = 0.99,  # percentage of sim. matrix that will be copied over from prev. iter
-        seed: int = 0,
-        max_length: int = 2048,
-    ):
-        super().__init__(
-            num_u,
-            dim_u,
-            V_prior_hparams,
-            dataset_size,
-            prior_mean_log_U,
-            prior_std_log_U,
-            U_max,
-            truncate_U,
-            guide_max_mean_log_U,
-            guide_max_std_log_U,
-            use_gpu,
-            use_mask,
-            eps,
-        )
-        self.min_prior_hparam = min_prior_hparam
-        self.max_prior_hparam = max_prior_hparam
-        self.prior_std_logit_A = prior_std_logit_A
-        self.prior_std_B = prior_std_B
-        self.gpu_batch_size = gpu_batch_size
-        self.gene_dna_sequences = gene_dna_sequences
-        self.gene_names = gene_names
-        self.tf_dna_sequences = tf_dna_sequences
-        self.tf_ids = tf_ids
-        assert self.gene_dna_sequences is not None
-        assert self.tf_dna_sequences is not None
-        self.model_name_or_path = model_name_or_path
-        self.use_gpu = use_gpu
-        self.max_length = max_length
-        self.prior_network = PriorNetwork(
-            model_name_or_path,
-            use_gpu=self.use_gpu,
-            initialize_model=initialize_similarity_matrix,
-            max_length=self.max_length,
-        )
-        self.tokenizer = self.prior_network.tokenizer
-        self.initialize_similarity_matrix = initialize_similarity_matrix
-        if sim_matrix_mask_rate is not None:
-            assert sim_matrix_mask_rate <= 1.0
-        self.sim_matrix_mask_rate = sim_matrix_mask_rate
-        self.seed = seed
-        random.seed(self.seed)
-
-        if self.initialize_similarity_matrix:
-            # self.prev_sim_matrix = self.prior_network.forward_dna_sequences(
-            #     self.gene_dna_sequences,
-            #     self.tf_dna_sequences,
-            #     batch_size=self.gpu_batch_size,
-            #     with_grad=False,
-            # )
-            self.prev_sim_matrix = self.V_prior_hparams.clip(
-                min=self.min_prior_hparam, max=self.max_prior_hparam
-            )
-
-    def compute_prior_network(self) -> torch.Tensor:
-        num_genes = len(self.gene_dna_sequences)
-        num_tfs = len(self.tf_dna_sequences)
-        combined = torch.clone(self.prev_sim_matrix)
-        if self.sim_matrix_mask_rate is not None:
-            num_genes_to_infer = int(
-                np.ceil(np.sqrt((1.0 - self.sim_matrix_mask_rate)) * num_genes)
-            )
-            num_tfs_to_infer = int(
-                np.ceil(np.sqrt((1.0 - self.sim_matrix_mask_rate)) * num_tfs)
-            )
-            gene_idxs_to_infer = random.sample(range(num_genes), k=num_genes_to_infer)
-            tf_idxs_to_infer = random.sample(range(num_tfs), k=num_tfs_to_infer)
-            gene_dna_seqs = [self.gene_dna_sequences[i] for i in gene_idxs_to_infer]
-            tf_dna_seqs = [self.tf_dna_sequences[i] for i in tf_idxs_to_infer]
-            prior_network_inferred = self.prior_network.forward_dna_sequences(
-                gene_dna_seqs,
-                tf_dna_seqs,
-                batch_size=self.gpu_batch_size,
-                with_grad=True,
-            )
-            inferred_idxs = list(product(gene_idxs_to_infer, tf_idxs_to_infer))
-            row_idxs = [p[0] for p in inferred_idxs]
-            col_idxs = [p[1] for p in inferred_idxs]
-            combined[row_idxs, col_idxs] = prior_network_inferred.flatten()
-        else:
-            gene_idxs_to_infer = random.sample(range(num_genes), k=self.gpu_batch_size)
-            tf_idxs_to_infer = random.sample(range(num_tfs), k=self.gpu_batch_size)
-            gene_dna_seqs = [self.gene_dna_sequences[i] for i in gene_idxs_to_infer]
-            tf_dna_seqs = [self.tf_dna_sequences[i] for i in tf_idxs_to_infer]
-            pairs = [(g, t) for g, t in zip(gene_dna_seqs, tf_dna_seqs)]
-            prior_network_inferred = self.prior_network.forward_pairs(
-                pairs, batch_size=self.gpu_batch_size, with_grad=True
-            )
-            combined[gene_idxs_to_infer, tf_idxs_to_infer] = prior_network_inferred
-        return combined
-
-    def model(
-        self,
-        i: torch.LongTensor,
-        prior_hparams_U_i: torch.Tensor,
-        data: torch.Tensor,
-        annealing_factor: float,
-        mask: torch.Tensor,
-    ):
-        with pyro.poutine.scale(None, annealing_factor):
-            with pyro.plate("gene_globals", len(self.V_prior_hparams)):
-
-                A = pyro.sample(
-                    "A",
-                    dist.TransformedDistribution(
-                        dist.Normal(
-                            torch.logit(
-                                self.V_prior_hparams.clip(
-                                    min=self.min_prior_hparam, max=self.max_prior_hparam
-                                )
-                            ),
-                            self.prior_std_logit_A,
-                        ).to_event(1),
-                        dist.transforms.SigmoidTransform(),
-                    ),
-                )
-
-                B = pyro.sample(
-                    "B",
-                    dist.Normal(
-                        torch.zeros_like(self.V_prior_hparams), self.prior_std_B
-                    ).to_event(1),
-                )
-                V = A * B
-            obs_std = pyro.sample(
-                "obs_std", dist.LogNormal(torch.tensor([0.0], device=data.device), 1)
-            )
-
-        with pyro.plate("locals", self.dataset_size, subsample=data):
-            with pyro.poutine.scale(None, annealing_factor):
-                U, seq_depth = self.sample_locals_prior(data, prior_hparams_U_i)
-                if self.U_max is not None:
-                    U = torch.clip(U, max=self.U_max)
-
-            obs_means = torch.matmul(U, torch.transpose(V, 0, 1)) * seq_depth
-            if self.use_mask is True:
-                obs_means = obs_means * mask
-                obs = data * mask
-            else:
-                obs = data
-            pyro.sample(
-                "obs", dist.Normal(obs_means, obs_std + 0.001).to_event(1), obs=obs
-            )
-
-    def register_pyro_modules(self):
-        pyro.module("prior_network", self.prior_network.model)
-
-    def guide(
-        self,
-        i: torch.LongTensor,
-        prior_hparams_U_i: torch.Tensor,
-        data: torch.Tensor,
-        annealing_factor: float,
-        mask: torch.Tensor,
-    ):
-        self.initialise_locals_guide(data)
-        self.register_pyro_modules()
-
-        self.posterior_stds_logit_A = pyro.param(
-            "A_stds",
-            torch.ones_like(self.V_prior_hparams) * 0.1,
-            constraint=constraints.greater_than(0.001),
-            event_dim=-1,
-        )
-        self.posterior_means_B = pyro.param(
-            "B_means", torch.zeros_like(self.V_prior_hparams), event_dim=-1
-        )
-        self.posterior_stds_B = pyro.param(
-            "B_stds",
-            torch.ones_like(self.V_prior_hparams) * 0.1,
-            constraint=constraints.greater_than(0.001),
-            event_dim=-1,
-        )
-
-        self.posterior_mean_obs_std = pyro.param(
-            "obs_std_mean", torch.tensor([0.0], device=data.device)
-        )
-        self.posterior_std_obs_std = pyro.param(
-            "obs_std_std",
-            torch.tensor([1.0], device=data.device),
-            constraint=constraints.greater_than(0.001),
-        )
-        # Only re-infer current sim matrix if in training model.
-        if self.is_training:
-            self.curr_sim_matrix = self.compute_prior_network()
-            self.prev_sim_matrix = None
-            gc.collect()
-            torch.cuda.empty_cache()
-            self.prev_sim_matrix = self.curr_sim_matrix.detach()
-            gc.collect()
-            torch.cuda.empty_cache()
-        else:
-            self.curr_sim_matrix = self.prev_sim_matrix
-
-        with pyro.poutine.scale(None, annealing_factor):
-            with pyro.plate("gene_globals", len(self.V_prior_hparams)):
-                A_posterior_mean = self.curr_sim_matrix
-                pyro.sample(
-                    "A",
-                    dist.TransformedDistribution(
-                        dist.Normal(
-                            A_posterior_mean, self.posterior_stds_logit_A
-                        ).to_event(1),
-                        dist.transforms.SigmoidTransform(),
-                    ),
-                )
-                pyro.sample(
-                    "B",
-                    dist.Normal(self.posterior_means_B, self.posterior_stds_B).to_event(
-                        1
-                    ),
-                )
-            pyro.sample(
-                "obs_std",
-                dist.LogNormal(self.posterior_mean_obs_std, self.posterior_std_obs_std),
-            )
-            with pyro.plate("locals", self.dataset_size, subsample=i):
-                self.sample_locals_guide(i)
+def log_gpu_memory(prefix_message=None):
+    if prefix_message is not None:
+        logger.info(prefix_message)
+    logger.info(
+        "torch.cuda.memory_allocated: %fGB"
+        % (torch.cuda.memory_allocated(0) / 1024 / 1024 / 1024)
+    )
+    logger.info(
+        "torch.cuda.max_memory_allocated: %fGB"
+        % (torch.cuda.max_memory_allocated(0) / 1024 / 1024 / 1024)
+    )
+    logger.info(
+        "torch.cuda.memory_reserved: %fGB"
+        % (torch.cuda.memory_reserved(0) / 1024 / 1024 / 1024)
+    )
+    logger.info(
+        "torch.cuda.max_memory_reserved: %fGB"
+        % (torch.cuda.max_memory_reserved(0) / 1024 / 1024 / 1024)
+    )

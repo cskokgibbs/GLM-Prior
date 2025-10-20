@@ -9,6 +9,7 @@ import random
 import sys
 import torch
 import wandb
+import time 
 
 from dataclasses import asdict
 from transformers import AutoModel, AutoConfig
@@ -41,10 +42,26 @@ from typing import Any, Dict, List
 from functools import partial
 from huggingface_hub import hf_hub_download, HfApi
 from huggingface_hub.utils import RepositoryNotFoundError
-from datasets import Dataset
+from datasets import Dataset, load_from_disk
 from scipy.special import softmax
 
 logger = logging.getLogger(__name__)
+
+def _save_downsampled(ds: Dataset, out_dir: str, subdir: str="downsampled_train"):
+    save_dir=os.path.join(out_dir, subdir)
+    os.makedirs(save_dir, exist_ok=True)
+    ds.save_to_disk(save_dir)
+    # lightweight metadata for traceability
+    meta={
+        "type":"downsampled_train",
+        "downsample_rate":float(script_args.downsample_rate),
+        "num_rows":len(ds),
+        "seed":int(TrainingArguments(**cfg_dict["training_args"]).seed) if "training_args" in cfg_dict else None
+    }
+    with open(os.path.join(save_dir,"meta.json"),"w") as f:
+        json.dump(meta,f)
+    logger.info(f"Saved downsampled train set to {save_dir}")
+    return save_dir
 
 def push_dataset_to_hub(dataset, repo_id, repo_type="dataset"):
     api = HfApi()
@@ -257,6 +274,8 @@ def compute_metrics(
 
     return metrics
 
+def _has_arrow_dataset(path):
+    return os.path.exists(os.path.join(path, "dataset_info.json"))
 
 @hydra.main(
     config_path="../config/prior_network", config_name="finetune_nt", version_base="1.2"
@@ -355,41 +374,83 @@ def main(cfg: DictConfig):
         full_ds = Dataset.from_dict(outputs)
 
     else:
-        # Round 0 but dataset exists already: use the cache
-        logger.info("Using cache from an existing experiment.")
-        cache = manage_cache(script_args, training_args.output_dir, script_args.tokenized_data_dir, load=True)
-        if cache is None:
-            raise ValueError("Cache not found. Ensure the cache was created in the previous round.")
+        # Prefer fast Arrow path if shards exist locally
+        if _has_arrow_dataset(script_args.tokenized_data_dir):
+            logger.info("Found local Arrow dataset; loading directly (memory-mapped).")
+            full_ds = load_from_disk(script_args.tokenized_data_dir)
+
+            if "label" in full_ds.column_names and "labels" not in full_ds.column_names:
+                full_ds = full_ds.rename_column("label", "labels")
+
+            full_ds = remove_duplicates(full_ds)
+            
         else:
-            logger.info("Cache loaded successfully!")
-        # Load full dataset and remove duplicates
-        full_ds = load_from_local_or_from_hugging_face(script_args.hf_repo, script_args.tokenized_data_dir)
-        full_ds = remove_duplicates(full_ds)
-        # Map tokenized inputs from cache to their respective labels
-        logger.info("Mapping tokenized inputs from cache to dataset.")
-        full_ds_df = full_ds.to_pandas()
-        outputs = []
-        for _, row in tqdm(
-            full_ds_df.iterrows(), desc="Getting tokenized inputs from cache..."
-        ):
-            outputs.extend(get_tokenized_from_cache_apply(row, cache))
-        outputs = pd.DataFrame(outputs)
-        logger.info(f"Dataset size after extending from cache: {outputs.shape}")
-        full_ds = Dataset.from_dict(outputs)
+            # Round 0 but dataset exists already: use the cache
+            logger.info("Using cache from an existing experiment.")
+            cache = manage_cache(script_args, training_args.output_dir, script_args.tokenized_data_dir, load=True)
+            if cache is None:
+                raise ValueError("Cache not found. Ensure the cache was created in the previous round.")
+            else:
+                logger.info("Cache loaded successfully!")
+            # Load full dataset and remove duplicates
+            full_ds = load_from_local_or_from_hugging_face(script_args.hf_repo, script_args.tokenized_data_dir)
+            full_ds = remove_duplicates(full_ds)
+            # Map tokenized inputs from cache to their respective labels
+            logger.info("Mapping tokenized inputs from cache to dataset.")
+            full_ds_df = full_ds.to_pandas()
+            outputs = []
+            for _, row in tqdm(
+                full_ds_df.iterrows(), desc="Getting tokenized inputs from cache..."
+            ):
+                outputs.extend(get_tokenized_from_cache_apply(row, cache))
+            outputs = pd.DataFrame(outputs)
+            logger.info(f"Dataset size after extending from cache: {outputs.shape}")
+            full_ds = Dataset.from_dict(outputs)
 
     # Split dataset
-    full_ds, train_ds, dev_ds = split_dataset(full_ds, script_args.train_prop, training_args.seed)
-
+    if getattr(script_args, "validation_data", False):
+        logger.info("validation_data=True → creating 80/10/10 train/val/test split.")
+        # First: 80% train, 20% temp
+        split_1 = full_ds.train_test_split(test_size=0.2, seed=training_args.seed, shuffle=True)
+        train_ds = split_1["train"]
+        temp_ds = split_1["test"]
+        # Second: split temp into 10% val and 10% test
+        split_2 = temp_ds.train_test_split(test_size=0.5, seed=training_args.seed, shuffle=True)
+        val_ds = split_2["train"] 
+        test_ds = split_2["test"]   
+        dev_ds = val_ds             
+        # Save all three
+        save_splits_to_disk(train_ds, val_ds, test_ds, training_args.output_dir, logger)
+    else:
+        logger.info("validation_data=False → using existing train/dev split logic.")
+        full_ds, train_ds, dev_ds = split_dataset(full_ds, script_args.train_prop, training_args.seed)
+    
     logger.info(f"Train dataset size: {len(train_ds)}")
     logger.info(f"Dev dataset size: {len(dev_ds)}")
 
-    # Downsample if required
-    if script_args.downsample_rate < 1.0:
-        logger.info(f"Downsampling negative samples with a rate of {script_args.downsample_rate}")
-        train_ds = downsample_negative_samples(train_ds, script_args.downsample_rate, "train")
-        #dev_ds = downsample_negative_samples(dev_ds, script_args.downsample_rate, "dev")
-    else:
-        logger.info(f"No downsampling applied. Rate: {script_args.downsample_rate}")
+    loaded_downsampled=False
+    if getattr(script_args,"load_downsampled_dir",None):
+        candidate=script_args.load_downsampled_dir
+        try:
+            train_ds=load_from_disk(candidate)
+            loaded_downsampled=True
+            logger.info(f"Loaded downsampled train set from {candidate} (n={len(train_ds)})")
+            # ensure expected columns
+            if "label" in train_ds.column_names and "labels" not in train_ds.column_names:
+                train_ds=train_ds.rename_column("label","labels")
+        except Exception as e:
+            logger.warning(f"Failed to load downsampled set from {candidate}: {e}. Will proceed to (re)downsample if requested.")
+
+    if not loaded_downsampled:
+        # Downsample if required
+        if script_args.downsample_rate < 1.0:
+            logger.info(f"Downsampling negative samples with a rate of {script_args.downsample_rate}")
+            train_ds = downsample_negative_samples(train_ds, script_args.downsample_rate, "train")
+
+            if getattr(script_args,"save_downsampled",False):
+                _save_downsampled(train_ds, training_args.output_dir, "downsampled_train")
+        else:
+            logger.info(f"No downsampling applied. Rate: {script_args.downsample_rate}")
 
 
     ####################### training #######################
@@ -431,6 +492,7 @@ def main(cfg: DictConfig):
         model = AutoModelForSequenceClassification.from_pretrained(
             script_args.model_name_or_path,
             config=config,
+            use_safetensors=True,
             **model_kwargs,
         )
     device = "cuda" if torch.cuda.is_available() else "cpu"

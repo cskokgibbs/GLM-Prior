@@ -4,6 +4,7 @@ import numpy as np
 import random
 import torch
 import torch.nn as nn
+import time
 
 from datasets import Dataset
 from itertools import cycle
@@ -20,7 +21,6 @@ from transformers.trainer_utils import seed_worker
 from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Union
 
 logger = logging.getLogger(__name__)
-
 
 class EvenClassBatchSampler(BatchSampler):
     def __init__(
@@ -136,6 +136,7 @@ class InteractionsTrainerImbalancedClasses(Trainer):
 
         Subclass and override this method if you want to inject some custom behavior.
         """
+        
         if self.train_dataset is None:
             raise ValueError("Trainer: training requires a train_dataset.")
 
@@ -154,6 +155,7 @@ class InteractionsTrainerImbalancedClasses(Trainer):
 
         if self.script_args.use_even_class_sampler:
             # TODO: get class indexes
+            """
             pos_class_indexes = []
             neg_class_indexes = []
             for i, ex in enumerate(train_dataset):
@@ -161,6 +163,18 @@ class InteractionsTrainerImbalancedClasses(Trainer):
                     pos_class_indexes.append(i)
                 else:
                     neg_class_indexes.append(i)
+            """
+            t = time.perf_counter()
+            labels_arr = np.asarray(train_dataset["labels"], dtype=np.float32)
+            thr = self.script_args.classification_threshold
+            pos_class_indexes = np.nonzero(labels_arr >= thr)[0].tolist()
+            neg_class_indexes = np.nonzero(labels_arr <  thr)[0].tolist()
+
+            logger.info(
+                f"[train()] build pos/neg indices (vectorized): {time.perf_counter()-t:.2f}s "
+                f"(pos={len(pos_class_indexes)}, neg={len(neg_class_indexes)})"
+            )
+            
             dataloader_params["batch_sampler"] = EvenClassBatchSampler(
                 self._train_batch_size,
                 self.args.dataloader_drop_last,

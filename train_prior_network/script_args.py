@@ -28,6 +28,10 @@ class ScriptArguments:
         default="preprocessing/yeast_genome/TF_info_scores_with_DBID.tsv",
         metadata={"help": "File containing DNA sequences for all TFs."},
     )
+    validation_data: Optional[bool] = field(
+        default="False",
+        metadata={"help": "True will implement cross-validation split of input gene_tf_prior data."}
+    )
     train_prop: Optional[float] = field(
         default=0.9,
         metadata={
@@ -142,5 +146,14 @@ class ScriptArguments:
         default=0,
         metadata={
             "help": "If set to 0, dataset will save and push to hugging face. If greater than 0, will skip saving."
+        },
+    )
+    saved_downsampled: Optional[bool] = field(
+        default=False, metadata={"help": "Will save a copy of the downsampled dataset used in training"}
+    )
+    load_downsampled_dir: Optional[str] = field(
+        default=False,
+        metadata={
+            "help": "Location of saved downsampled data to load during training"
         },
     )

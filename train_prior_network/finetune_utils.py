@@ -64,13 +64,60 @@ def push_to_hugging_face(full_ds, hf_repo, tokenized_data_dir):
     full_ds.save_to_disk(os.path.join(tokenized_data_dir, "tokenized_data"))
 
 def load_from_local_or_from_hugging_face(hf_repo, tokenized_data_dir):
+    # 1) Arrow on disk (fast path)
+    if os.path.exists(os.path.join(tokenized_data_dir, "dataset_info.json")):
+        logger.info(f"Loading Arrow dataset from: {tokenized_data_dir}")
+        return load_from_disk(tokenized_data_dir)
+
+    # 2) Common alternate subdir name
+    alt_dir = os.path.join(tokenized_data_dir, "tokenized_data")
+    if os.path.exists(os.path.join(alt_dir, "dataset_info.json")):
+        logger.info(f"Loading Arrow dataset from: {alt_dir}")
+        return load_from_disk(alt_dir)
+
+    # 3) Parquet in the directory
+    parquet_files = [f for f in os.listdir(tokenized_data_dir) if f.endswith(".parquet")]
+    if parquet_files:
+        logger.info(f"Found {len(parquet_files)} Parquet files; loading them.")
+        data_files = os.path.join(tokenized_data_dir, "*.parquet")
+        return load_dataset("parquet", data_files=data_files, split="train")
+
+    # 4) Fall back to Hub
+    logger.info(f"Local dataset not found. Loading dataset from Hugging Face: {hf_repo}")
+    api = HfApi()
+    files_in_repo = api.list_repo_files(repo_id=hf_repo, repo_type="dataset")
+    parquet_files = [f for f in files_in_repo if f.startswith("data/") and f.endswith(".parquet")]
+    datasets_list = []
+    for file_name in parquet_files:
+        dataset_fp = hf_hub_download(repo_id=hf_repo, filename=file_name, repo_type="dataset")
+        df = pd.read_parquet(dataset_fp)
+        ds = Dataset.from_pandas(df)
+        datasets_list.append(ds)
+    full_ds = concatenate_datasets(datasets_list)
+    logger.info(f"Full dataset loaded from Hub, length={len(full_ds)}")
+    return full_ds
+
+def load_from_local_or_from_hugging_face_old(hf_repo, tokenized_data_dir):
     """Loads the dataset from local storage if available, otherwise from Hugging Face Hub."""
     local_path = os.path.join(tokenized_data_dir, "tokenized_data")
     if os.path.exists(tokenized_data_dir):
-        logger.info(f"Loading dataset from local path: {tokenized_data_dir}")
-        full_ds = load_from_disk(tokenized_data_dir)
-        logger.info(f"Full dataset loaded locally with length: {len(full_ds)}")
-        return full_ds
+        try:
+            logger.info(f"Loading dataset from local path: {tokenized_data_dir}")
+            full_ds = load_from_disk(tokenized_data_dir)
+            logger.info(f"Full dataset loaded locally with length: {len(full_ds)}")
+            return full_ds
+        except Exception as e:
+            logger.warning(f"Arrow dataset not found in {tokenized_data_dir}: {e}")
+
+        parquet_files = [f for f in os.listdir(tokenized_data_dir) if f.endswith(".parquet")]
+        if parquet_files:
+            logger.info(f"Found {len(parquet_files)} Parquet files in {tokenized_data_dir}, loading with datasets.load_dataset")
+            data_files = os.path.join(tokenized_data_dir, "*.parquet")
+            full_ds = load_dataset("parquet", data_files=data_files, split="train")
+            logger.info(f"Loaded Parquet dataset locally, length={len(full_ds)}")
+            return full_ds
+        logger.warning(f"No Arrow or Parquet dataset found in {tokenized_data_dir}")
+        
     else:
         logger.info(f"Local dataset not found. Loading dataset from Hugging Face: {hf_repo}")
         api = HfApi()
@@ -222,7 +269,7 @@ def split_dataset(full_ds, train_prop, seed):
     full_ds = DatasetDict({"train": split["train"], "dev": split["test"]})
     return full_ds, full_ds["train"], full_ds["dev"]
 
-def downsample_negative_samples(dataset, downsample_rate, dataset_type):
+def downsample_negative_samples_old(dataset, downsample_rate, dataset_type):
     """Downsamples negative class in the given dataset according to the downsample rate."""
     logger.info(f"Downsampling {dataset_type} dataset's negative class.")
     data_dict = dataset.to_dict()
@@ -246,4 +293,30 @@ def downsample_negative_samples(dataset, downsample_rate, dataset_type):
     logger.info(f"Downsampling complete. New {dataset_type} dataset size: {len(downsampled_dataset)}")
     return downsampled_dataset
 
+def downsample_negative_samples(ds, downsample_rate, dataset_type):
+    logger.info(f"Downsampling {dataset_type} negatives at rate={downsample_rate}")
+    cols = ds.column_names
+    assert "labels" in cols
+    neg = ds.filter(lambda l: l == 0, input_columns=["labels"])
+    pos = ds.filter(lambda l: l > 0, input_columns=["labels"])
+    k = int(len(neg) * downsample_rate)
+    if k > 0 and k < len(neg):
+        import random
+        random.seed(0)
+        keep_idx = random.sample(range(len(neg)), k)
+        neg = neg.select(keep_idx)
+    mixed = concatenate_datasets([pos, neg]).shuffle(seed=0)
+    logger.info(f"Downsampled sizes → pos={len(pos)}, neg={len(neg)}, total={len(mixed)}")
+    return mixed
 
+def save_splits_to_disk(train_ds, val_ds, test_ds, out_dir, logger):
+    dd = {"train": train_ds}
+    if val_ds is not None: dd["val"] = val_ds
+    if test_ds is not None: dd["test"] = test_ds
+    dd = DatasetDict(dd)
+    save_path = os.path.join(out_dir, "splits")
+    os.makedirs(save_path, exist_ok=True)
+    logger.info(f"Saving dataset splits to {save_path}")
+    dd.save_to_disk(save_path)
+    sizes = {k: len(v) for k, v in dd.items()}
+    logger.info(f"Saved splits with sizes: {sizes}")
