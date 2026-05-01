@@ -127,7 +127,7 @@ class PriorNetwork(nn.Module):
             iterable = np.arange(0, len(tokenized), batch_size)
             iterable = tqdm(iterable, desc="Computing similarity matrix")
             logging.info(f"Length of iterable: {len(iterable)}")
-            for batch_start_idx in iterable:
+            for batch_num, batch_start_idx in enumerate(iterable):
                 batch_tokenized = tokenized[
                     batch_start_idx : batch_start_idx + batch_size
                 ]
@@ -143,8 +143,9 @@ class PriorNetwork(nn.Module):
                 if torch.any(torch.isnan(batch_outputs)).item():
                     logging.warning(f"Found NaNs in model outputs: {batch_outputs}")
                 outputs.append(batch_outputs)
-                gc.collect()
-                torch.cuda.empty_cache()
+                if batch_num % 50 == 0:
+                    gc.collect()
+                    torch.cuda.empty_cache()
         outputs = torch.cat(outputs)
         if torch.any(torch.isnan(outputs)).item():
             logging.warning(f"Found NaNs in cat-ed model outputs: {outputs}")
@@ -209,9 +210,7 @@ class PriorNetwork(nn.Module):
             iterable = np.arange(0, len(gene_and_tf_idx_pairs), batch_size)
             if not with_grad:
                 iterable = tqdm(iterable, desc="Computing original similarity matrix")
-            log_interval = 100
-            j = 0
-            for batch_start_idx in iterable:
+            for batch_num, batch_start_idx in enumerate(iterable):
                 batch_idx_pairs = gene_and_tf_idx_pairs[
                     batch_start_idx : batch_start_idx + batch_size
                 ]
@@ -223,12 +222,10 @@ class PriorNetwork(nn.Module):
                 outputs.append(
                     self.forward(tokenized.input_ids, tokenized.attention_mask)
                 )
-                gc.collect()
-                torch.cuda.empty_cache()
-
-                if j % log_interval == 0:
-                    log_gpu_memory(prefix_message=f"GPU memory at iter {j}")
-                j += 1
+                if batch_num % 50 == 0:
+                    gc.collect()
+                    torch.cuda.empty_cache()
+                    log_gpu_memory(prefix_message=f"GPU memory at batch {batch_num}")
         outputs = torch.cat(outputs)
         tf_seq_boundaries = [0, *end_idxs]
         output_matrix = []

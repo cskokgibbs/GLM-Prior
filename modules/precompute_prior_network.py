@@ -54,16 +54,13 @@ def parse_args():
 def load_tokenized_cache(dataset_name: str):
     ds = load_dataset(dataset_name, split="train")
     cache = defaultdict(list)
-
-    def map_fn(ex):
+    for ex in tqdm(ds, desc="creating cache..."):
         cache[(ex["gene"], ex["TF"])].append(
             {
                 "input_ids": torch.LongTensor(ex["input_ids"]),
                 "attention_mask": torch.LongTensor(ex["attention_mask"]),
             }
         )
-
-    ds = ds.map(map_fn, desc="creating cache...")
     return cache
 
 

@@ -2,33 +2,30 @@ import os
 import logging
 import hydra
 
-from dataclasses import asdict
-from train_prior_network.finetune_utils import *
-from omegaconf import DictConfig, OmegaConf
-from transformers import (
-    AutoTokenizer,
-    EvalPrediction,
-    TrainingArguments,
-    AutoModelForSequenceClassification,
+from functools import partial
+from train_prior_network.finetune_utils import (
+    initialize_dataset,
+    map_dataset,
+    tokenize_dataset,
 )
-from datasets import Dataset, DatasetDict, concatenate_datasets, load_from_disk
+from train_prior_network.script_args import ScriptArguments
+from omegaconf import DictConfig, OmegaConf
+from transformers import AutoTokenizer
 
 logger = logging.getLogger(__name__)
 
+
 @hydra.main(
-    config_path="../config/prior_network", config_name="finetune_nt", version_base="1.2"
+    config_path="../config", config_name="train_prior_network_pipeline", version_base="1.2"
 )
 def main(cfg: DictConfig):
-    logger.info(f"Working directory : {os.getcwd()}")
-    logger.info(
-        f"Output directory : {hydra.core.hydra_config.HydraConfig.get().runtime.output_dir}"
-    )
-    cfg_dict = OmegaConf.to_container(cfg)
-    training_args = TrainingArguments(**cfg_dict["training_args"])
-    script_args = ScriptArguments(**cfg_dict["script_args"])
-    cfg_dict = {**cfg_dict, "training_args": asdict(training_args)}
+    output_dir = cfg.training_args.output_dir
+    seed = cfg.training_args.seed
+    logger.info(f"Output directory: {output_dir}")
 
-    logger.info(f"Parsed training_args: {training_args}")
+    cfg_dict = OmegaConf.to_container(cfg)
+    script_args = ScriptArguments(**cfg_dict["script_args"])
+
     logger.info(f"Parsed script_args: {script_args}")
 
     tokenizer = AutoTokenizer.from_pretrained(script_args.model_name_or_path)
@@ -39,16 +36,15 @@ def main(cfg: DictConfig):
         "padding": "max_length",
     }
 
-    full_ds = initialize_dataset(script_args, training_args)
-    full_ds = map_dataset(full_ds, tokenizer)  
+    full_ds = initialize_dataset(script_args, seed)
+    full_ds = map_dataset(full_ds, tokenizer)
     full_ds = tokenize_dataset(full_ds, tokenizer, tokenizer_kwargs)
-    
-    logger.info(f"Saving full tokenized dataset for prior to {training_args.output_dir}")
-    full_ds.save_to_disk(training_args.output_dir)
-    logger.info(f"Pushing tokenized dataset to Hugging Face repo: {script_args.hf_repo}")
-    full_ds.push_to_hub(script_args.hf_repo)
-    # create a cache
-    manage_cache(script_args, training_args.output_dir, script_args.tokenized_data_dir, load=False)
+
+    tokenized_data_dir = os.path.join(output_dir, "tokenized_data")
+    logger.info(f"Saving tokenized dataset to {tokenized_data_dir}")
+    os.makedirs(tokenized_data_dir, exist_ok=True)
+    full_ds.save_to_disk(tokenized_data_dir)
+    logger.info("Tokenization complete.")
 
 if __name__ == "__main__":
     main()

@@ -1,47 +1,66 @@
-defaults:
-  - prior_network: finetune_nt
+# Training settings (used directly by finetune_nt.py and tokenize_sequences.py)
+training_args:
+  output_dir: "/mnt/ceph/users/cskokgibbs/2026/GLM-Prior-Experiments/HepG2/"  # required; set via CLI: training_args.output_dir=/path/to/experiment
+  learning_rate: 1e-5
+  per_device_train_batch_size: 32
+  per_device_eval_batch_size: 32
+  gradient_accumulation_steps: 16
+  logging_steps: 1
+  num_train_epochs: 10
+  report_to: "wandb"
+  seed: 42
+  do_eval: True
+  eval_strategy: "steps"
+  save_strategy: "steps"
+  eval_steps: 0.05
+  save_steps: 0.1
+  include_inputs_for_metrics: True
+  log_level: "info"
+  logging_first_step: True
+  label_names: ["labels"]
+  load_best_model_at_end: True
+  save_total_limit: 2
+  metric_for_best_model: "best_f1_from_thresholding"
+  greater_is_better: True
+  dataloader_drop_last: False
+  #ddp_backend: "nccl"
+  #local_rank: -1
 
-sanity_check: False
-working_dir: ???
-num_training_rounds: 1 # will total 2x num. of training rounds, since
-                        # we alternate between training prior network and PMFGRN
-overwrite: False
-prior_network_singularity_overlay: /scratch/csg337/pmf-grn-3dc/envs/overlay-15GB-500K.ext3
-prior_network_singularity_img: /scratch/work/public/singularity/cuda12.1.1-cudnn8.9.0-devel-ubuntu22.04.2.sif
-prior_network_initial_model: "InstaDeepAI/nucleotide-transformer-v2-250m-multi-species"
-prior_network_num_inference_jobs: 4
-prior_network_inference_singularity_overlay: /scratch/csg337/envs/overlay-25GB-500K.ext3
-prior_network_inference_singularity_img: /scratch/work/public/singularity/cuda11.8.86-cudnn8.7-devel-ubuntu22.04.2.sif
-gold_fp: data/yeast/gold_standard.tsv
-email: null
-slurm_output_dir: null
-log_level: info
-seed: 0
-num_seed_bits: 10  # how many bits to use to generate subsequence random seeds
-wandb_entity: "pmf-grn-3dc"
+script_args:
+  # Pipeline orchestration settings
+  overwrite: False
+  conda_env: pmf-prior-network
+  inference_chunk_size: 1000  # number of genes per inference SLURM array task
+  num_gpus: 1  # set >1 to launch training with torchrun (DDP)
+  email: cskokgibbs@flatironinstitute.org
+  slurm_output_dir: null
+  log_level: info
 
+  # Data
+  model_name_or_path: "InstaDeepAI/nucleotide-transformer-v2-250m-multi-species"
+  gene_tf_prior_data: "data/HepG2/Human_String_Trrust_no_gene_tf_label_overlap_with_HepG2.tsv"
+  gene_dna_sequences: "data/HepG2/HepG2_gene_DNA_seqs_no_GTL_overlap.tsv"
+  tf_dna_sequences: "data/HepG2/HepG2_TFs_DNA_seqs_no_GTL_overlap.tsv"
+  train_prop: 0.99
+  downsample_rate: 0.4
+  max_eval_examples: 1000
+  max_length: 512
 
-# will override configs in config/prior_network/finetune_nt.yaml
-prior_network_training:
-  training_args:
-    learning_rate: 1e-5
-    do_eval: True
-    eval_strategy: "steps"
-    eval_steps: 0.05
-    save_steps: 0.1
-    logging_steps: 1
-    per_device_train_batch_size: 32
-  script_args:
-    downsample_rate: 1.0
-    gene_dna_sequences: "data/yeast/gene_DNA_sequences_ordered.tsv" 
-    tf_dna_sequences: "data/yeast/TF_info_scores_with_DBID_and_missing_sequences.tsv"
-    class_weights: [0.7, 1.0]
-    use_even_class_sampler: True
-    tokenized_data_dir: "/vast/csg337/pmf-grn-3dc/data/yeast/tokenized_data/"
-    gene_tf_prior_data: "data/yeast/YEASTRACT_20190713_BOTH.tsv"
-    max_length: 512
-    new_experiment: True
-    use_ddp: False
-    num_gpus: 1 # 1 will run regular training mode without ddp
- 
+  # Wandb
+  wandb_project: "HepG2_run1"
+  wandb_run_name: "Refactor"
+  wandb_entity: "pmf-grn-3dc"
 
+  # Training options
+  sanity_check: False
+  torch_dtype: null
+  class_weights: [1.0, 1.0]
+  classification_threshold: 0.5
+  use_even_class_sampler: True
+
+inference_args:
+  gene_dna_sequences: "data/HepG2/HepG2_gene_DNA_seqs.tsv"
+  tf_dna_sequences: "data/HepG2/HepG2_TF_DNA_seqs.tsv"
+  gold_standard_data: "data/HepG2/HepG2_RefNetwork.tsv"
+  gpu_batch_size: 64
+  slurm_profile: legacy_a100

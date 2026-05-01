@@ -4,33 +4,32 @@ import logging
 import numpy as np
 import os
 import pandas as pd
-import pprint
 import random
 import sys
 import torch
 import wandb
-import time 
+import time
 
 from dataclasses import asdict
-from transformers import AutoModel, AutoConfig
-from datasets import Dataset, DatasetDict, load_dataset, concatenate_datasets
+from datasets import load_from_disk
 from omegaconf import DictConfig, OmegaConf
+from scipy.special import softmax
 from sklearn.metrics import (
     matthews_corrcoef,
-    f1_score,
     confusion_matrix,
     classification_report,
     roc_auc_score,
     roc_curve,
 )
-from tqdm import tqdm
-from train_prior_network.balanced_classes_trainer import (
-    InteractionsTrainerImbalancedClasses,
-)
-from train_prior_network.create_dataset import create_gene_tf_dataset
+from train_prior_network.balanced_classes_trainer import InteractionsTrainerImbalancedClasses
 from train_prior_network.script_args import ScriptArguments
-from train_prior_network.convert_pretokenized_data_to_cache import cache_pretokenized_data
-from train_prior_network.finetune_utils import *
+from train_prior_network.finetune_utils import (
+    initialize_dataset,
+    map_dataset,
+    tokenize_dataset,
+    split_dataset,
+    downsample_negative_samples,
+)
 from transformers import (
     AutoTokenizer,
     EvalPrediction,
@@ -39,40 +38,8 @@ from transformers import (
     AutoConfig,
 )
 from typing import Any, Dict, List
-from functools import partial
-from huggingface_hub import hf_hub_download, HfApi
-from huggingface_hub.utils import RepositoryNotFoundError
-from datasets import Dataset, load_from_disk
-from scipy.special import softmax
 
 logger = logging.getLogger(__name__)
-
-def _save_downsampled(ds: Dataset, out_dir: str, subdir: str="downsampled_train"):
-    save_dir=os.path.join(out_dir, subdir)
-    os.makedirs(save_dir, exist_ok=True)
-    ds.save_to_disk(save_dir)
-    # lightweight metadata for traceability
-    meta={
-        "type":"downsampled_train",
-        "downsample_rate":float(script_args.downsample_rate),
-        "num_rows":len(ds),
-        "seed":int(TrainingArguments(**cfg_dict["training_args"]).seed) if "training_args" in cfg_dict else None
-    }
-    with open(os.path.join(save_dir,"meta.json"),"w") as f:
-        json.dump(meta,f)
-    logger.info(f"Saved downsampled train set to {save_dir}")
-    return save_dir
-
-def push_dataset_to_hub(dataset, repo_id, repo_type="dataset"):
-    api = HfApi()
-    try:
-        api.repo_info(repo_id=repo_id, repo_type=repo_type)
-        logger.info(f"Repository '{repo_id}' exists. Pushing dataset to hugging face.")
-    except RepositoryNotFoundError:
-        logger.info(f"Repository '{repo_id}' does not exist. Creating the repository.")
-        api.create_repo(repo_id=repo_id, repo_type=repo_type, private=False)
-    # push the dataset to the repo
-    dataset.push_to_hub(repo_id)
 
 
 def evaluate_prediction_matrix(
@@ -105,7 +72,6 @@ def evaluate_prediction_matrix(
     combined_df = combined_ds.to_pandas()
     combined_df["predicted_interaction"] = predicted_labels
 
-    # evaluate predictions against the prior-knowledge
     evaluation_df = pd.merge(
         combined_df, prior_knowledge_long, on=["gene", "TF"], how="left"
     )
@@ -114,7 +80,6 @@ def evaluate_prediction_matrix(
         evaluation_df["predicted_interaction"] == evaluation_df["interaction"]
     )
 
-    # calculate metrics
     y_true = evaluation_df["interaction"]
     y_pred = evaluation_df["predicted_interaction"]
 
@@ -137,7 +102,6 @@ def evaluate_prediction_matrix(
     logger.info(f"Confusion Matrix:\n{confusion}")
     logger.info(f"Classification Report:\n{report}")
 
-    # calculate accuracy
     accuracy = np.mean(y_true == y_pred)
     logger.info(f"Accuracy: {accuracy:.2f}")
     return evaluation_df
@@ -151,44 +115,6 @@ def save_interaction_matrix(evaluation_df, output_dir):
     output_file = os.path.join(output_dir, "predicted_interactions.tsv")
     interaction_matrix.to_csv(output_file, sep="\t")
     logger.info(f"Interaction matrix saved to {output_file}")
-
-
-def format_strs(batch, tokenizer):
-    """
-    Format sequences as <gene DNA sequence><cls><TF DNA sequence>.
-    Tokenizer will automatically add another <cls> in front.
-    """
-    inputs = [
-        f"{batch['gene_DNA'][i]}{tokenizer.cls_token}{batch['TF_DNA'][i]}"
-        for i in range(len(batch["gene_DNA"]))
-    ]
-    return {"formatted_inputs": inputs}
-
-
-def tokenize(batch, tokenizer_kwargs, tokenizer) -> Dict[str, Any]:
-    tokenized_outputs = tokenizer(batch["formatted_inputs"], **tokenizer_kwargs)
-    return {
-        "input_ids": tokenized_outputs["input_ids"],
-        "attention_mask": tokenized_outputs["attention_mask"],
-        "labels": batch["interaction"],
-    }
-
-
-def get_tokenized_from_cache_apply(row, cache) -> List[Dict[str, Any]]:
-    output_dicts = []
-    tokenized_dicts = cache[(row["gene"], row["TF"])]
-    for dna_pair in tokenized_dicts:
-        # TODO: remove padding
-        output_dicts.append(
-            {
-                "gene": row["gene"],
-                "TF": row["TF"],
-                "input_ids": dna_pair["input_ids"],
-                "attention_mask": dna_pair["attention_mask"],
-                "labels": row["interaction"],
-            }
-        )
-    return output_dicts
 
 
 def compute_f1_threshold(references, probabilities):
@@ -218,14 +144,13 @@ def compute_f1_threshold(references, probabilities):
 
     return best_f1, best_threshold
 
+
 def compute_metrics(
     eval_pred: EvalPrediction, threshold: float = 0.5, output_thresholds_fp: str = None
 ):
     """Computes precision, recall, and F1 score with threshold optimization"""
     logits = eval_pred.predictions
-    references = (eval_pred.label_ids >= threshold).astype(
-        int
-    )  # references may be probabilities instead of hard labels
+    references = (eval_pred.label_ids >= threshold).astype(int)
 
     probabilities = softmax(logits, axis=-1)
     positive_class_probs = probabilities[:, 1]
@@ -233,7 +158,6 @@ def compute_metrics(
     try:
         roc_auc = roc_auc_score(references, positive_class_probs)
     except ValueError as e:
-        # roc_auc_score will return a ValueError if only one class is represented in the true labels
         logging.warning(e)
         roc_auc = None
 
@@ -243,21 +167,22 @@ def compute_metrics(
         "best_f1_score": float(best_f1),
         "best_threshold": float(best_threshold),
     }
-    wandb.log(f1_and_thres_dict)
-    with open(output_thresholds_fp, "a") as f:
-        f.write(json.dumps(f1_and_thres_dict) + "\n")
+    if wandb.run is not None:
+        wandb.log(f1_and_thres_dict)
+    if output_thresholds_fp is not None:
+        with open(output_thresholds_fp, "a") as f:
+            f.write(json.dumps(f1_and_thres_dict) + "\n")
 
     thresholded_predictions = (positive_class_probs >= best_threshold).astype(int)
 
-    # Get classification report for precision, recall, and f1-score
     report = classification_report(
         references, thresholded_predictions, output_dict=True, zero_division=0
     )
     mcc = matthews_corrcoef(references, thresholded_predictions)
 
-    wandb.log({"roc_auc": roc_auc})
+    if wandb.run is not None:
+        wandb.log({"roc_auc": roc_auc})
 
-    # Extract metrics for the positive and negative classes
     logger.info(f"Report: {report}")
     metrics = {
         "accuracy": report["accuracy"],
@@ -274,11 +199,13 @@ def compute_metrics(
 
     return metrics
 
+
 def _has_arrow_dataset(path):
-    return os.path.exists(os.path.join(path, "dataset_info.json"))
+    return path is not None and os.path.exists(os.path.join(path, "dataset_info.json"))
+
 
 @hydra.main(
-    config_path="../config/prior_network", config_name="finetune_nt", version_base="1.2"
+    config_path="../config", config_name="train_prior_network_pipeline", version_base="1.2"
 )
 def main(cfg: DictConfig):
     print(f"Working directory : {os.getcwd()}")
@@ -292,9 +219,10 @@ def main(cfg: DictConfig):
     script_args = ScriptArguments(**cfg_dict["script_args"])
     training_args.report_to = ["wandb"]
     training_args.run_name = script_args.wandb_run_name
-    # now get *all training args* now that TrainingArguments has post-processed
     cfg_dict = {**cfg_dict, "training_args": asdict(training_args)}
     os.environ["WANDB_PROJECT"] = script_args.wandb_project
+
+    is_main_process = training_args.local_rank in (-1, 0)
 
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
@@ -314,17 +242,17 @@ def main(cfg: DictConfig):
         logger.info(f"Class: {label} has weight {weight}")
 
     os.environ["WANDB_LOG_MODEL"] = "false"
-    wandb.init(
-        project=script_args.wandb_project,
-        name=script_args.wandb_run_name,
-        entity=script_args.wandb_entity,
-        config=cfg_dict,
-    )
-    wandb.run.log_artifact = lambda *args, **kwargs: None
+    if is_main_process:
+        wandb.init(
+            project=script_args.wandb_project,
+            name=script_args.wandb_run_name,
+            entity=script_args.wandb_entity,
+            config=cfg_dict,
+        )
+        wandb.run.log_artifact = lambda *args, **kwargs: None
     random.seed(training_args.seed)
 
     ####################### tokenization #######################
-    # initialize tokenizer
     tokenizer = AutoTokenizer.from_pretrained(script_args.model_name_or_path)
     tokenizer_kwargs = {
         "max_length": script_args.max_length,
@@ -333,134 +261,45 @@ def main(cfg: DictConfig):
         "padding": "max_length",
     }
 
+    tokenized_data_dir = os.path.join(training_args.output_dir, "tokenized_data")
+
     if script_args.sanity_check:
-        script_args.new_experiment = True
-    
-    if script_args.new_experiment:
-        logger.info(f"New experiment, creating dataset from matrix: {script_args.gene_tf_prior_data}.")
-        full_ds = initialize_dataset(script_args, training_args)
-        
-        # Process dataset: format, tokenize, and save
+        logger.info("sanity_check=True — tokenizing inline from prior matrix.")
+        full_ds = initialize_dataset(script_args, training_args.seed)
         full_ds = map_dataset(full_ds, tokenizer)
         full_ds = tokenize_dataset(full_ds, tokenizer, tokenizer_kwargs)
-
-        if not script_args.sanity_check and script_args.round_num == 0:
-            logger.info(f"Sanity check is set to: {script_args.sanity_check}")
-            logger.info(f"Train prior network round {script_args.round_num}")
-            logger.info("Pushing dataset to hugging face.")
-            push_to_hugging_face(full_ds, script_args.hf_repo, script_args.tokenized_data_dir)
-            logger.info("Creating cache and pushing to hugging face.")
-            manage_cache(script_args, training_args.output_dir, script_args.tokenized_data_dir, load=False)
-            
-    elif script_args.round_num > 0 and not script_args.sanity_check:
-        logger.info(f"Round number is: {script_args.round_num}, creating and mapping dataset")
-        full_ds = initialize_dataset(script_args, training_args)
-        logger.info("Using cache from an existing experiment.")
-        cache = manage_cache(script_args, training_args.output_dir, script_args.tokenized_data_dir, load=True)
-        if cache is None:
-            raise ValueError("Cache not found. Ensure the cache was created in the previous round.")
-        else:
-            logger.info("Cache loaded successfully!")
-        full_ds = remove_duplicates(full_ds)
-        logger.info("Mapping tokenized inputs from cache to dataset.")
-        full_ds_df = full_ds.to_pandas()
-        outputs = []
-        for _, row in tqdm(
-            full_ds_df.iterrows(), desc="Getting tokenized inputs from cache..."
-        ):
-            outputs.extend(get_tokenized_from_cache_apply(row, cache))
-        outputs = pd.DataFrame(outputs)
-        logger.info(f"Dataset size after extending from cache: {outputs.shape}")
-        full_ds = Dataset.from_dict(outputs)
-
+    elif _has_arrow_dataset(tokenized_data_dir):
+        logger.info("Loading tokenized dataset from disk (memory-mapped Arrow format).")
+        full_ds = load_from_disk(tokenized_data_dir)
+        if "label" in full_ds.column_names and "labels" not in full_ds.column_names:
+            full_ds = full_ds.rename_column("label", "labels")
     else:
-        # Prefer fast Arrow path if shards exist locally
-        if _has_arrow_dataset(script_args.tokenized_data_dir):
-            logger.info("Found local Arrow dataset; loading directly (memory-mapped).")
-            full_ds = load_from_disk(script_args.tokenized_data_dir)
+        raise FileNotFoundError(
+            f"Tokenized dataset not found at {tokenized_data_dir!r}. "
+            "Run the tokenize step first (train_prior_network.tokenize_sequences), "
+            "or set sanity_check=True to tokenize inline."
+        )
 
-            if "label" in full_ds.column_names and "labels" not in full_ds.column_names:
-                full_ds = full_ds.rename_column("label", "labels")
+    # Split dataset: train_prop (default 0.99) goes to train, remainder to dev
+    full_ds, train_ds, dev_ds = split_dataset(full_ds, script_args.train_prop, training_args.seed)
 
-            full_ds = remove_duplicates(full_ds)
-            
-        else:
-            # Round 0 but dataset exists already: use the cache
-            logger.info("Using cache from an existing experiment.")
-            cache = manage_cache(script_args, training_args.output_dir, script_args.tokenized_data_dir, load=True)
-            if cache is None:
-                raise ValueError("Cache not found. Ensure the cache was created in the previous round.")
-            else:
-                logger.info("Cache loaded successfully!")
-            # Load full dataset and remove duplicates
-            full_ds = load_from_local_or_from_hugging_face(script_args.hf_repo, script_args.tokenized_data_dir)
-            full_ds = remove_duplicates(full_ds)
-            # Map tokenized inputs from cache to their respective labels
-            logger.info("Mapping tokenized inputs from cache to dataset.")
-            full_ds_df = full_ds.to_pandas()
-            outputs = []
-            for _, row in tqdm(
-                full_ds_df.iterrows(), desc="Getting tokenized inputs from cache..."
-            ):
-                outputs.extend(get_tokenized_from_cache_apply(row, cache))
-            outputs = pd.DataFrame(outputs)
-            logger.info(f"Dataset size after extending from cache: {outputs.shape}")
-            full_ds = Dataset.from_dict(outputs)
-
-    # Split dataset
-    if getattr(script_args, "validation_data", False):
-        logger.info("validation_data=True → creating 80/10/10 train/val/test split.")
-        # First: 80% train, 20% temp
-        split_1 = full_ds.train_test_split(test_size=0.2, seed=training_args.seed, shuffle=True)
-        train_ds = split_1["train"]
-        temp_ds = split_1["test"]
-        # Second: split temp into 10% val and 10% test
-        split_2 = temp_ds.train_test_split(test_size=0.5, seed=training_args.seed, shuffle=True)
-        val_ds = split_2["train"] 
-        test_ds = split_2["test"]   
-        dev_ds = val_ds             
-        # Save all three
-        save_splits_to_disk(train_ds, val_ds, test_ds, training_args.output_dir, logger)
-    else:
-        logger.info("validation_data=False → using existing train/dev split logic.")
-        full_ds, train_ds, dev_ds = split_dataset(full_ds, script_args.train_prop, training_args.seed)
-    
     logger.info(f"Train dataset size: {len(train_ds)}")
     logger.info(f"Dev dataset size: {len(dev_ds)}")
 
-    loaded_downsampled=False
-    if getattr(script_args,"load_downsampled_dir",None):
-        candidate=script_args.load_downsampled_dir
-        try:
-            train_ds=load_from_disk(candidate)
-            loaded_downsampled=True
-            logger.info(f"Loaded downsampled train set from {candidate} (n={len(train_ds)})")
-            # ensure expected columns
-            if "label" in train_ds.column_names and "labels" not in train_ds.column_names:
-                train_ds=train_ds.rename_column("label","labels")
-        except Exception as e:
-            logger.warning(f"Failed to load downsampled set from {candidate}: {e}. Will proceed to (re)downsample if requested.")
-
-    if not loaded_downsampled:
-        # Downsample if required
-        if script_args.downsample_rate < 1.0:
-            logger.info(f"Downsampling negative samples with a rate of {script_args.downsample_rate}")
-            train_ds = downsample_negative_samples(train_ds, script_args.downsample_rate, "train")
-
-            if getattr(script_args,"save_downsampled",False):
-                _save_downsampled(train_ds, training_args.output_dir, "downsampled_train")
-        else:
-            logger.info(f"No downsampling applied. Rate: {script_args.downsample_rate}")
-
+    if script_args.downsample_rate < 1.0:
+        logger.info(f"Downsampling negative samples with a rate of {script_args.downsample_rate}")
+        train_ds = downsample_negative_samples(train_ds, script_args.downsample_rate, "train", seed=training_args.seed)
+    else:
+        logger.info(f"No downsampling applied. Rate: {script_args.downsample_rate}")
 
     ####################### training #######################
     logger.info("Starting training!")
     logger.info(f"Train dataset size: {len(train_ds)}")
     logger.info(f"Dev dataset size: {len(dev_ds)}")
-    
+
     if script_args.sanity_check:
         logger.info(
-            f"Running in sanity-check mode. Will reduce the sizes of the datasets and train for only one epoch."
+            "Running in sanity-check mode. Reducing dataset sizes and training for one epoch."
         )
         train_ds = train_ds.select(range(min(len(train_ds), 1000)))
         dev_ds = dev_ds.select(range(min(len(dev_ds), 1000)))
@@ -472,7 +311,7 @@ def main(cfg: DictConfig):
         and len(dev_ds) > script_args.max_eval_examples
     ):
         dev_ds = dev_ds.select(range(script_args.max_eval_examples))
-    
+
     model_kwargs = {}
     if script_args.torch_dtype is not None:
         assert hasattr(torch, script_args.torch_dtype)
@@ -485,7 +324,7 @@ def main(cfg: DictConfig):
     except Exception as e:
         logger.warning(f"Failed to load model with default config: {e}")
         config = AutoConfig.from_pretrained(
-            "InstaDeepAI/nucleotide-transformer-v2-250m-multi-species",  # Base config
+            "InstaDeepAI/nucleotide-transformer-v2-250m-multi-species",
             trust_remote_code=True,
         )
         config.num_labels = 2
@@ -501,7 +340,7 @@ def main(cfg: DictConfig):
     saved_thresholds_fp = os.path.join(
         training_args.output_dir, "f1s_and_thresholds.jsonl"
     )
-    
+
     trainer = InteractionsTrainerImbalancedClasses(
         model,
         training_args,
@@ -518,23 +357,24 @@ def main(cfg: DictConfig):
     trainer.train()
 
     trainer.save_model(training_args.output_dir)
-      
+
     ####################### predict and evaluate #######################
 
-    evaluation_df = evaluate_prediction_matrix(
-        trainer,
-        dev_ds,  # updated to eval on dev split
-        script_args.gene_tf_prior_data,
-        sanity_check=script_args.sanity_check,
-        classification_threshold=cfg.script_args.classification_threshold,
-    )
+    if is_main_process:
+        evaluation_df = evaluate_prediction_matrix(
+            trainer,
+            dev_ds,
+            script_args.gene_tf_prior_data,
+            sanity_check=script_args.sanity_check,
+            classification_threshold=cfg.script_args.classification_threshold,
+        )
+        logger.info(
+            "Evaluation DataFrame: \n%s\nShape: %s",
+            evaluation_df.head(),
+            evaluation_df.shape,
+        )
+        save_interaction_matrix(evaluation_df, training_args.output_dir)
 
-    logger.info(
-        "Evaluation DataFrame: \n%s\nShape: %s",
-        evaluation_df.head(),
-        evaluation_df.shape,
-    )
-    save_interaction_matrix(evaluation_df, training_args.output_dir)
 
 if __name__ == "__main__":
     main()

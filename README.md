@@ -23,34 +23,19 @@ GLM-Prior is the first stage in a **dual-stage training pipeline** that includes
 
 ---
 
-## 🌳 Environment Setup
-GLM-Prior is designed to run within a **Singularity container** using a Conda environment. Follow the steps below to create and activate the environment. Installation time is approximately less than 5 minutes.
+## Environment Setup
+GLM-Prior uses a **Conda environment**. Follow the steps below to create and activate the environment. Installation time is approximately less than 5 minutes.
 
-### 1. Create Conda Environment
+### 1. Create and Activate Conda Environment
 ```
-conda create -p /ext3/pmf-prior-network python=3.10 -y
+conda create -n pmf-prior-network python=3.10 -y
+conda activate pmf-prior-network
 ```
 
 ### 2. Install Required Packages
 ```
 pip install torch==2.3.1 torchvision==0.18.1 torchaudio==2.3.1 --index-url https://download.pytorch.org/whl/cu121
-pip install hydra-core pandas datasets scikit-learn transformers wandb
-```
-
-### 3. Launch Singularity Container
-```
-singularity exec --nv --overlay overlay-15GB-500K.ext3:ro --bind local:$HOME/.local cuda12.1.1-cudnn8.9.0-devel-ubuntu22.04.2.sif /bin/bash
-```
-
-### 4. Final Environment Installations
-```
-conda env update --prefix /ext3/pmf-prior-network --file environment_prior_network.yaml --prune
-```
-
-### 5. Activate the Environment
-```
-source /ext3/env.sh
-conda activate /ext3/pmf-prior-network
+pip install -e . 
 ```
 
 ## 🧬 Dataset Preparation
@@ -74,19 +59,27 @@ To train the GLM-Prior model on DNA sequence input:
 ### 1. Edit configuration files with appropriate file paths and optimal hyperparameters for full training:
 - `config/train_prior_network_pipeline.yaml`
 - `config/prior_network/finetune_nt.yaml`
-### 2. Set Singularity paths in `config/train_prior_network_pipeline.yaml`
-- `prior_network_singularity_overlay` - overlay path for environment
-- `prior_network_singularity_img` - path to Singularity image
-### 3. Launch training pipeline:
-`sbatch train_prior_network_pipeline.slurm TPN_pipeline`
-This will launch dynamic slurm scripts to:
+### 2. Launch training pipeline:
+```
+conda activate pmf-prior-network
+
+sbatch slurm/tokenize.slurm
+sbatch slurm/train.slurm
+python submit_inference.py
+python evaluate_predictions.py
+```
+This will:
 - Tokenize sequences
 - Train GLM-Prior
 - Perform inference on gene-TF pairs
 - Evaluate predictions vs. a gold standard
 - Save outputs to:
-`output/<experiment_name>/prior_network_predictions.tsv`
-`output/<experiment_name>/auprc_vs_gold.json`
+```
+<working_dir>/prior_network/prior_network_predictions.tsv
+<working_dir>/prior_network/auprc_vs_gold.json
+```
+
+**Note:** Run each step after the previous one completes. Submit inference jobs with `submit_inference.py` after training finishes, then run `evaluate_predictions.py` once all inference jobs complete.
 
 ## 🔍 Hyperparameter Sweep
 To optimize GLM-Prior for a new dataset, we recommend running a pre-training hyperparameter sweep over 1 epoch. To run a hyperparameter sweep:
@@ -100,7 +93,7 @@ Confirm paths and set `num_train_epochs: 1` in `config/prior_network/finetune_nt
 
 ### 2. Submit sweep jobs
 ```
-./train_prior_network/finetune_nt_hp_sweep.sh $USER /scratch/$USER/GLM-Prior/envs/overlay-15GB-500K.ext3 /scratch/work/public/singularity/cuda12.1.1-cudnn8.9.0-devel-ubuntu22.04.2.sif ./train_prior_network/hp-sweep/
+./train_prior_network/finetune_nt_hp_sweep.sh ./train_prior_network/hp-sweep/
 ```
 Each configuration will be submitted as an individual SLURM job. Weights & Biases will automatically track all sweeps. Select the configuration with the best F1 score and update your training config accordingly.
 

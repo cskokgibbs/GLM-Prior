@@ -11,14 +11,11 @@
 
 # args 1: name of working dir
 
-source /scratch/work/public/singularity/greene-ib-slurm-bind.sh
-
-SINGULARITY_OVERLAY="/scratch/${USER}/envs/overlay-25GB-500K.ext3"
-SINGULARITY_IMG="/scratch/work/public/singularity/cuda11.8.86-cudnn8.7-devel-ubuntu22.04.2.sif"
+CONDA_ENV=pmf-prior-network
 WORKING_DIR="${1}/experiment_results/"
-SLURM_OUTPUT_DIR="$(dirname "$(pwd)")/slurm_output"
-singularity exec --overlay ${SINGULARITY_OVERLAY}:ro ${SINGULARITY_IMG} /bin/bash -c "
-source /ext3/env.sh
-conda deactivate && conda activate /ext3/pmf-grn
-python -m train_prior_network_pipeline working_dir=${WORKING_DIR} slurm_output_dir=${SLURM_OUTPUT_DIR} email=${USER}@nyu.edu || exit
-"
+
+source ~/miniforge3/bin/activate ${CONDA_ENV}
+
+python -m train_prior_network_pipeline \
+  working_dir=${WORKING_DIR} \
+  email=${USER}@nyu.edu

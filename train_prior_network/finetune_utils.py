@@ -1,22 +1,54 @@
+import gzip
+import numpy as np
 import os
+import pprint
 import random
 import logging
-import pprint
 import pandas as pd
 import torch
 
 from collections import defaultdict
-from datasets import Dataset, DatasetDict, concatenate_datasets, load_from_disk
-from train_prior_network.create_dataset import create_gene_tf_dataset
-from train_prior_network.convert_pretokenized_data_to_cache import cache_pretokenized_data
-from train_prior_network.finetune_nt import *
+from datasets import Dataset, DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 from functools import partial
 from huggingface_hub import HfApi, hf_hub_download
 from huggingface_hub.utils import RepositoryNotFoundError
+from train_prior_network.create_dataset import create_gene_tf_dataset
+from train_prior_network.convert_pretokenized_data_to_cache import cache_pretokenized_data
+from transformers import AutoTokenizer
+from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
 
-def initialize_dataset(script_args, training_args):
+
+def push_dataset_to_hub(dataset, repo_id, repo_type="dataset"):
+    api = HfApi()
+    try:
+        api.repo_info(repo_id=repo_id, repo_type=repo_type)
+        logger.info(f"Repository '{repo_id}' exists. Pushing dataset to hugging face.")
+    except RepositoryNotFoundError:
+        logger.info(f"Repository '{repo_id}' does not exist. Creating the repository.")
+        api.create_repo(repo_id=repo_id, repo_type=repo_type, private=False)
+    dataset.push_to_hub(repo_id)
+
+
+def format_strs(batch, tokenizer):
+    """Format sequences as <gene DNA><cls><TF DNA>. Tokenizer adds another <cls> in front."""
+    inputs = [
+        f"{batch['gene_DNA'][i]}{tokenizer.cls_token}{batch['TF_DNA'][i]}"
+        for i in range(len(batch["gene_DNA"]))
+    ]
+    return {"formatted_inputs": inputs}
+
+
+def tokenize(batch, tokenizer_kwargs, tokenizer) -> Dict[str, Any]:
+    tokenized_outputs = tokenizer(batch["formatted_inputs"], **tokenizer_kwargs)
+    return {
+        "input_ids": tokenized_outputs["input_ids"],
+        "attention_mask": tokenized_outputs["attention_mask"],
+        "labels": batch["interaction"],
+    }
+
+def initialize_dataset(script_args, seed):
     """Creates the initial gene-TF dataset."""
     logger.info(f"Creating initial gene-TF dataset from {script_args.gene_tf_prior_data}.")
     full_ds = create_gene_tf_dataset(
@@ -24,7 +56,7 @@ def initialize_dataset(script_args, training_args):
         script_args.tf_dna_sequences,
         script_args.gene_tf_prior_data,
         classification_threshold=float(script_args.classification_threshold),
-        seed=training_args.seed,
+        seed=seed,
         sanity_check=script_args.sanity_check,
     )
     return full_ds
@@ -258,9 +290,12 @@ def split_and_upload_cache(script_args, cache, tokenized_data_dir):
 def remove_duplicates(full_ds):
     """Removes duplicate gene-TF pairs."""
     logger.info(f"Removing duplicates from dataset. Initial length: {len(full_ds)}")
-    full_ds = Dataset.from_pandas(full_ds.to_pandas().drop_duplicates(subset=["gene", "TF"]))
-    logger.info(f"Duplicates removed. New length: {len(full_ds)}")
-    return full_ds
+    # Extract only the two key columns to avoid materializing the full tokenized dataset
+    pairs = pd.DataFrame({"gene": full_ds["gene"], "TF": full_ds["TF"]})
+    keep = pairs.drop_duplicates(subset=["gene", "TF"]).index.tolist()
+    result = full_ds.select(keep)
+    logger.info(f"Duplicates removed. New length: {len(result)}")
+    return result
 
 def split_dataset(full_ds, train_prop, seed):
     """Splits dataset into train and dev sets."""
@@ -293,20 +328,20 @@ def downsample_negative_samples_old(dataset, downsample_rate, dataset_type):
     logger.info(f"Downsampling complete. New {dataset_type} dataset size: {len(downsampled_dataset)}")
     return downsampled_dataset
 
-def downsample_negative_samples(ds, downsample_rate, dataset_type):
+def downsample_negative_samples(ds, downsample_rate, dataset_type, seed=0):
     logger.info(f"Downsampling {dataset_type} negatives at rate={downsample_rate}")
-    cols = ds.column_names
-    assert "labels" in cols
-    neg = ds.filter(lambda l: l == 0, input_columns=["labels"])
-    pos = ds.filter(lambda l: l > 0, input_columns=["labels"])
-    k = int(len(neg) * downsample_rate)
-    if k > 0 and k < len(neg):
-        import random
-        random.seed(0)
-        keep_idx = random.sample(range(len(neg)), k)
-        neg = neg.select(keep_idx)
-    mixed = concatenate_datasets([pos, neg]).shuffle(seed=0)
-    logger.info(f"Downsampled sizes → pos={len(pos)}, neg={len(neg)}, total={len(mixed)}")
+    assert "labels" in ds.column_names
+    labels = np.asarray(ds["labels"], dtype=np.float32)
+    pos_idx = np.nonzero(labels > 0)[0].tolist()
+    neg_idx = np.nonzero(labels == 0)[0].tolist()
+    n_neg_orig = len(neg_idx)
+    k = int(n_neg_orig * downsample_rate)
+    if k > 0 and k < n_neg_orig:
+        random.seed(seed)
+        neg_idx = random.sample(neg_idx, k)
+    keep = sorted(pos_idx + neg_idx)
+    mixed = ds.select(keep).shuffle(seed=seed)
+    logger.info(f"Downsampled sizes → pos={len(pos_idx)} (all kept), neg={len(neg_idx)}/{n_neg_orig} kept, total={len(mixed)}")
     return mixed
 
 def save_splits_to_disk(train_ds, val_ds, test_ds, out_dir, logger):
